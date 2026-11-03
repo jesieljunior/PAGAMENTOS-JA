@@ -208,7 +208,7 @@ export const carregarOperacaoEvento = createServerFn({ method: "POST" })
 
 export const decidirPonto = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((input: unknown) =>
+  .validator((input: unknown) =>
     z
       .object({
         pontoId: z.string().uuid(),
@@ -256,7 +256,7 @@ export const decidirPonto = createServerFn({ method: "POST" })
 
 export const lancarPontoManual = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((input: unknown) =>
+  .validator((input: unknown) =>
     z
       .object({
         escalaId: z.string().uuid(),

@@ -123,3 +123,17 @@ export const cadastrarOuRedefinirUsuario = createServerFn({ method: "POST" })
       };
     }
   });
+
+export async function getAdminClientSafe() {
+  try {
+    const { hasAdminKey, supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    if (!hasAdminKey()) return null;
+    const record = supabaseAdmin as unknown as Record<string, unknown>;
+    if (typeof record["from"] === "function") {
+      return supabaseAdmin;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}

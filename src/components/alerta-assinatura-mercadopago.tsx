@@ -29,17 +29,25 @@ export function AlertaAssinaturaMercadoPago() {
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 w-full">
           <div>
             <AlertTitle className="font-bold flex items-center gap-2">
-              <span>Assinatura Bloqueada por Pendência Financeira</span>
+              <span>
+                {assinatura.motivo?.includes("teste")
+                  ? "Período de Teste Gratuito Encerrado"
+                  : "Assinatura Bloqueada por Pendência Financeira"}
+              </span>
             </AlertTitle>
             <AlertDescription className="text-xs sm:text-sm mt-1 text-red-800 dark:text-red-300">
               {assinatura.motivo ??
-                "O pagamento da sua assinatura no Mercado Pago está vencido. Funcionalidades operacionais (escalas, pontos e fechamentos) estão bloqueadas."}
+                "O pagamento da sua assinatura está vencido. Funcionalidades operacionais (escalas, pontos e fechamentos) estão bloqueadas."}
             </AlertDescription>
           </div>
           <Button asChild size="sm" variant="destructive" className="shrink-0 font-semibold">
             <Link to="/plano" className="inline-flex items-center gap-1.5">
               <CreditCard className="size-4" />
-              <span>Regularizar Pagamento</span>
+              <span>
+                {assinatura.motivo?.includes("teste")
+                  ? "Escolher um Plano"
+                  : "Regularizar Pagamento"}
+              </span>
               <ArrowRight className="size-3.5" />
             </Link>
           </Button>

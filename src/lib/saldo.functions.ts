@@ -22,7 +22,7 @@ const dataMais = (dias: number) => {
 
 export const iniciarRecarga = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((input: unknown) => recargaSchema.parse(input))
+  .validator((input: unknown) => recargaSchema.parse(input))
   .handler(async ({ data, context }) => {
     const { supabase, userId } = context;
 

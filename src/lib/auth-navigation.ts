@@ -108,11 +108,13 @@ export function resolverDestinoAcesso(
 }
 
 export interface ExtracaoToken {
-  tipo: "tokens_hash" | "token_param" | "codigo_puro";
+  tipo: "tokens_hash" | "token_param" | "token_hash_param" | "code_param" | "codigo_puro";
   accessToken?: string;
   refreshToken?: string;
   token?: string;
-  tokenType?: "email" | "magiclink";
+  tokenHash?: string;
+  code?: string;
+  tokenType?: "email" | "magiclink" | "signup";
 }
 
 /**
@@ -136,12 +138,43 @@ export function extrairTokenOuLink(input: string): ExtracaoToken {
     }
   }
 
-  // Caso 2: URL contendo query param ?token=...
-  if (limpo.includes("token=")) {
+  // Caso 2: URL ou string com parâmetros de consulta
+  if (
+    limpo.includes("token_hash=") ||
+    limpo.includes("token=") ||
+    limpo.includes("code=") ||
+    limpo.startsWith("http://") ||
+    limpo.startsWith("https://")
+  ) {
     try {
-      const url = new URL(limpo);
-      const token = url.searchParams.get("token");
-      const tokenType = (url.searchParams.get("type") as "email" | "magiclink") ?? "email";
+      // Se não for URL completa, cria uma pseudo-URL para extrair query params
+      const parsedUrl =
+        limpo.startsWith("http://") || limpo.startsWith("https://")
+          ? new URL(limpo)
+          : new URL(`https://app.local/?${limpo.replace(/^\?/, "")}`);
+
+      const tokenHash = parsedUrl.searchParams.get("token_hash");
+      const token = parsedUrl.searchParams.get("token");
+      const code = parsedUrl.searchParams.get("code");
+      const rawType = parsedUrl.searchParams.get("type");
+      const tokenType =
+        rawType === "signup" || rawType === "magiclink" || rawType === "email" ? rawType : "email";
+
+      if (tokenHash) {
+        return {
+          tipo: "token_hash_param",
+          tokenHash,
+          tokenType,
+        };
+      }
+
+      if (code) {
+        return {
+          tipo: "code_param",
+          code,
+        };
+      }
+
       if (token) {
         return {
           tipo: "token_param",

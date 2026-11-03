@@ -2,7 +2,6 @@ import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
-import { getAdminClientSafe } from "@/lib/auth.functions";
 import { calcularDataFimTrial, DIAS_TRIAL_PADRAO, PLANOS_CATALOGO } from "@/lib/planos-catalogo";
 
 const concluirOnboardingSchema = z.object({
@@ -17,7 +16,8 @@ export const concluirCadastroComEmpresaEPlano = createServerFn({ method: "POST" 
   .validator((input: unknown) => concluirOnboardingSchema.parse(input))
   .handler(async ({ data, context }) => {
     const client = context.supabase;
-    const admin = await getAdminClientSafe();
+    const { getAdminClientSafe } = await import("@/integrations/supabase/client.server");
+    const admin = getAdminClientSafe();
     const db = admin || client;
     const userId = context.userId;
 

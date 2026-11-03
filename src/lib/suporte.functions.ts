@@ -13,7 +13,7 @@ const buscaEmpresaSchema = z
 
 export const localizarEmpresasSuporte = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((input: unknown) => buscaEmpresaSchema.parse(input))
+  .validator((input: unknown) => buscaEmpresaSchema.parse(input))
   .handler(async ({ context, data }) => {
     requirePlatformContext(context);
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
@@ -59,7 +59,7 @@ export const localizarEmpresasSuporte = createServerFn({ method: "GET" })
 
 export const iniciarAtendimentoSuporte = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((input: unknown) =>
+  .validator((input: unknown) =>
     z
       .object({ empresaId: z.string().uuid(), motivo: z.string().trim().min(5).max(1000) })
       .parse(input),
@@ -76,7 +76,7 @@ export const iniciarAtendimentoSuporte = createServerFn({ method: "POST" })
 
 export const encerrarAtendimentoSuporte = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((input: unknown) => atendimentoSchema.parse(input))
+  .validator((input: unknown) => atendimentoSchema.parse(input))
   .handler(async ({ context, data }) => {
     requirePlatformContext(context);
     const r = await context.supabase.rpc("encerrar_atendimento", {
@@ -88,7 +88,7 @@ export const encerrarAtendimentoSuporte = createServerFn({ method: "POST" })
 
 export const listarDadosSuporte = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((input: unknown) => atendimentoSchema.parse(input))
+  .validator((input: unknown) => atendimentoSchema.parse(input))
   .handler(async ({ context, data }) => {
     requirePlatformContext(context);
     const atendimento = await context.supabase

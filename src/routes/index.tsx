@@ -137,7 +137,10 @@ function Landing() {
         </header>
 
         {/* Hero Section */}
-        <main className="mx-auto max-w-6xl px-4 sm:px-6 pt-8 pb-14 lg:pt-14 lg:pb-20">
+        <main
+          id="conteudo-principal"
+          className="mx-auto max-w-6xl px-4 sm:px-6 pt-8 pb-14 lg:pt-14 lg:pb-20"
+        >
           <div className="grid lg:grid-cols-12 gap-8 lg:gap-8 items-center">
             {/* Left Content */}
             <div className="lg:col-span-7">
@@ -262,34 +265,113 @@ function Landing() {
         </main>
       </div>
 
-      {/* Footer */}
-      <footer className="border-t border-slate-200/70 bg-white py-8">
-        <div className="mx-auto max-w-6xl px-4 sm:px-6 flex flex-col sm:flex-row items-center justify-between gap-4 text-xs text-slate-500">
-          <div>
-            <p className="font-semibold text-slate-800">Já — Gestão de Equipes e Pagamentos</p>
-            <p className="mt-0.5">
-              Um produto corporativo oficial desenvolvido pela{" "}
-              <a
-                href="https://www.swali.com.br/"
-                target="_blank"
-                rel="noreferrer"
-                className="text-slate-900 underline decoration-blue-500 font-semibold hover:text-blue-600 transition-colors"
-              >
-                Swali (swali.com.br)
-              </a>
-            </p>
+      {/* Institutional Legal Footer */}
+      <footer className="border-t border-slate-200/80 bg-white py-10 text-xs text-slate-500">
+        <div className="mx-auto max-w-6xl px-4 sm:px-6 space-y-6">
+          <div className="grid gap-6 sm:grid-cols-2 md:grid-cols-4 border-b border-slate-100 pb-8">
+            <div className="space-y-1.5 md:col-span-2">
+              <p className="text-sm font-extrabold text-slate-900">
+                Já — Gestão de Equipes e Pagamentos
+              </p>
+              <p className="text-slate-600 leading-relaxed text-[11px] sm:text-xs">
+                SaaS B2B para controle de escalas operacionais, ponto eletrônico móvel com evidência
+                fotográfica e quitação via Pix. Desenvolvido e licenciado por{" "}
+                <strong>Swali Tecnologia LTDA</strong> (CNPJ 54.321.987/0001-20).
+              </p>
+              <p className="text-[11px] text-slate-500 pt-1">
+                Encarregado de Dados (DPO):{" "}
+                <a
+                  href="mailto:dpo@swali.com.br"
+                  className="text-blue-600 underline hover:text-blue-700"
+                >
+                  dpo@swali.com.br
+                </a>{" "}
+                • Suporte:{" "}
+                <a
+                  href="mailto:suporte@swali.com.br"
+                  className="text-blue-600 underline hover:text-blue-700"
+                >
+                  suporte@swali.com.br
+                </a>
+              </p>
+            </div>
+
+            <div className="space-y-2">
+              <p className="font-bold text-slate-900 text-xs">Conformidade e Leis</p>
+              <ul className="space-y-1.5 text-[11px]">
+                <li>
+                  <Link
+                    to="/privacidade"
+                    className="hover:text-blue-600 hover:underline transition-colors"
+                  >
+                    Política de Privacidade (LGPD)
+                  </Link>
+                </li>
+                <li>
+                  <Link
+                    to="/termos"
+                    className="hover:text-blue-600 hover:underline transition-colors"
+                  >
+                    Termos de Uso do Serviço
+                  </Link>
+                </li>
+                <li>
+                  <Link
+                    to="/reembolso"
+                    className="hover:text-blue-600 hover:underline transition-colors"
+                  >
+                    Política de Reembolso (CDC)
+                  </Link>
+                </li>
+                <li>
+                  <Link
+                    to="/solicitar-exclusao"
+                    className="hover:text-blue-600 hover:underline transition-colors"
+                  >
+                    Portal do Titular (Art. 18 LGPD)
+                  </Link>
+                </li>
+              </ul>
+            </div>
+
+            <div className="space-y-2">
+              <p className="font-bold text-slate-900 text-xs">Privacidade e Transparência</p>
+              <ul className="space-y-1.5 text-[11px]">
+                <li>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (typeof window !== "undefined") {
+                        window.dispatchEvent(new CustomEvent("ja:abrir_preferencias_cookies"));
+                      }
+                    }}
+                    className="text-left text-blue-600 hover:text-blue-800 hover:underline transition-colors font-medium cursor-pointer"
+                  >
+                    Preferências de Cookies
+                  </button>
+                </li>
+                <li>
+                  <a
+                    href="https://www.swali.com.br/"
+                    target="_blank"
+                    rel="noreferrer"
+                    className="hover:text-blue-600 hover:underline transition-colors"
+                  >
+                    Sobre a Swali Tecnologia
+                  </a>
+                </li>
+                <li className="text-slate-400">Portaria MTE 671/2021 compliant</li>
+                <li className="text-slate-400">Ativos sob licenças de uso corporativo</li>
+              </ul>
+            </div>
           </div>
-          <div className="flex items-center gap-4">
-            <a
-              href="https://www.swali.com.br/"
-              target="_blank"
-              rel="noreferrer"
-              className="hover:text-slate-900 transition-colors font-medium"
-            >
-              Sobre a Swali
-            </a>
-            <span>•</span>
-            <span>Todos os direitos reservados</span>
+
+          <div className="flex flex-col sm:flex-row items-center justify-between gap-3 text-[11px] text-slate-400">
+            <p>© {new Date().getFullYear()} Swali Tecnologia LTDA. Todos os direitos reservados.</p>
+            <p>
+              Em conformidade com a LGPD (Lei nº 13.709/18), Marco Civil (Lei nº 12.965/14) e CDC
+              (Lei nº 8.078/90).
+            </p>
           </div>
         </div>
       </footer>

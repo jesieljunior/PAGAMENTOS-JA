@@ -52,7 +52,7 @@ export const carregarVisaoMaster = createServerFn({ method: "GET" })
   });
 export const alterarAtivacaoSuporte = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((input: unknown) =>
+  .validator((input: unknown) =>
     z.object({ usuarioId: z.string().uuid(), ativo: z.boolean() }).parse(input),
   )
   .handler(async ({ context, data }) => {

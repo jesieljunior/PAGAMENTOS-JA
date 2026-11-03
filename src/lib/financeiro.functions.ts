@@ -28,7 +28,7 @@ const agendamentoSchema = z.object({
 /** Cria a cobrança do cliente do evento no Asaas, com split da taxa. */
 export const criarCobranca = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((input: unknown) => cobrancaSchema.parse(input))
+  .validator((input: unknown) => cobrancaSchema.parse(input))
   .handler(async ({ data, context }) => {
     const { supabase, userId } = context;
     requireOrganizationContext(context);
@@ -135,7 +135,7 @@ export const criarCobranca = createServerFn({ method: "POST" })
 /** Consulta o Asaas e credita o saldo quando a cobrança já foi paga. */
 export const sincronizarCobranca = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((input: unknown) => z.object({ id: z.string().uuid() }).parse(input))
+  .validator((input: unknown) => z.object({ id: z.string().uuid() }).parse(input))
   .handler(async ({ data, context }) => {
     const { supabase, userId } = context;
     requireOrganizationContext(context);
@@ -206,7 +206,7 @@ export const sincronizarCobranca = createServerFn({ method: "POST" })
 /** Envia o Pix ao freelancer contra o saldo da agência. */
 export const executarPagamentoPix = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((input: unknown) => z.object({ pagamentoId: z.string().uuid() }).parse(input))
+  .validator((input: unknown) => z.object({ pagamentoId: z.string().uuid() }).parse(input))
   .handler(async ({ data, context }) => {
     const contextoEmpresa = requireOrganizationContext(context);
     const { exigirCapacidade } = await import("./autorizacao.server");
@@ -222,7 +222,7 @@ export const executarPagamentoPix = createServerFn({ method: "POST" })
 /** Gera o pagamento exclusivamente do valor aprovado no fechamento. */
 export const gerarPagamento = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((input: unknown) => pagamentoSchema.parse(input))
+  .validator((input: unknown) => pagamentoSchema.parse(input))
   .handler(async ({ data, context }) => {
     const organizacao = requireOrganizationContext(context);
     const { exigirCapacidade } = await import("./autorizacao.server");
@@ -273,7 +273,7 @@ export const gerarPagamento = createServerFn({ method: "POST" })
 
 export const agendarPagamentos = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((input: unknown) => agendamentoSchema.parse(input))
+  .validator((input: unknown) => agendamentoSchema.parse(input))
   .handler(async ({ data, context }) => {
     const organizacao = requireOrganizationContext(context);
     const { exigirCapacidade } = await import("./autorizacao.server");
@@ -306,7 +306,7 @@ export const agendarPagamentos = createServerFn({ method: "POST" })
 
 export const reabrirPagamentoFalho = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((input: unknown) => z.object({ pagamentoId: z.string().uuid() }).parse(input))
+  .validator((input: unknown) => z.object({ pagamentoId: z.string().uuid() }).parse(input))
   .handler(async ({ data, context }) => {
     const organizacao = requireOrganizationContext(context);
     const { exigirCapacidade } = await import("./autorizacao.server");

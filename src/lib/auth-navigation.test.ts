@@ -116,4 +116,20 @@ describe("auth-navigation: extrairTokenOuLink", () => {
     expect(res.token).toBe("pkce_abc999");
     expect(res.tokenType).toBe("magiclink");
   });
+
+  it("extrai parâmetro token_hash e type signup de link de confirmação do Supabase", () => {
+    const url =
+      "https://rutmjtmirwcyoroyjqdy.supabase.co/auth/v1/verify?token_hash=pkce_hash_777&type=signup&redirect_to=http://localhost:3000/auth";
+    const res = extrairTokenOuLink(url);
+    expect(res.tipo).toBe("token_hash_param");
+    expect(res.tokenHash).toBe("pkce_hash_777");
+    expect(res.tokenType).toBe("signup");
+  });
+
+  it("extrai código PKCE de query param code", () => {
+    const url = "https://app.swali.com.br/auth?code=pkce_code_abcdef123";
+    const res = extrairTokenOuLink(url);
+    expect(res.tipo).toBe("code_param");
+    expect(res.code).toBe("pkce_code_abcdef123");
+  });
 });

@@ -38,7 +38,8 @@ export const Route = createFileRoute("/_authenticated/onboarding")({
       { property: "og:title", content: "Cadastrar Agência e Escolher Plano — Já" },
       {
         property: "og:description",
-        content: "Primeiro passo no Já: cadastre sua agência e selecione seu plano com 7 dias grátis.",
+        content:
+          "Primeiro passo no Já: cadastre sua agência e selecione seu plano com 7 dias grátis.",
       },
     ],
   }),
@@ -86,17 +87,13 @@ function Onboarding() {
           `Agência criada com sucesso! Você tem ${DIAS_TRIAL_PADRAO} dias de acesso gratuito liberados.`,
         );
       } else {
-        toast.success(
-          `Agência criada e plano ${res.planoNome} selecionado! Bem-vindo ao Já.`,
-        );
+        toast.success(`Agência criada e plano ${res.planoNome} selecionado! Bem-vindo ao Já.`);
       }
 
       navigate({ to: "/painel", replace: true });
     } catch (err) {
       setSalvando(false);
-      toast.error(
-        err instanceof Error ? err.message : "Erro ao concluir cadastro da agência.",
-      );
+      toast.error(err instanceof Error ? err.message : "Erro ao concluir cadastro da agência.");
     }
   }
 
@@ -115,7 +112,8 @@ function Onboarding() {
             Cadastre sua Agência e Escolha seu Plano
           </h1>
           <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400 max-w-xl mx-auto">
-            Comece com o <strong>Plano Gratuito de {DIAS_TRIAL_PADRAO} dias</strong> para testar todas as funções ou selecione o plano ideal para a sua escala de eventos.
+            Comece com o <strong>Plano Gratuito de {DIAS_TRIAL_PADRAO} dias</strong> para testar
+            todas as funções ou selecione o plano ideal para a sua escala de eventos.
           </p>
         </div>
 
@@ -178,12 +176,16 @@ function Onboarding() {
                     2. Escolha o Plano Inicial
                   </h2>
                   <p className="text-xs text-slate-500">
-                    O plano gratuito é válido por <strong>{DIAS_TRIAL_PADRAO} dias</strong>. Após este período, você pode escolher um plano definitivo.
+                    O plano gratuito é válido por <strong>{DIAS_TRIAL_PADRAO} dias</strong>. Após
+                    este período, você pode escolher um plano definitivo.
                   </p>
                 </div>
               </div>
 
-              <Badge variant="outline" className="self-start sm:self-auto border-emerald-500/40 text-emerald-700 bg-emerald-50 dark:bg-emerald-950/40 dark:text-emerald-300">
+              <Badge
+                variant="outline"
+                className="self-start sm:self-auto border-emerald-500/40 text-emerald-700 bg-emerald-50 dark:bg-emerald-950/40 dark:text-emerald-300"
+              >
                 <Sparkles className="size-3 mr-1" />
                 {DIAS_TRIAL_PADRAO} Dias de Teste Grátis
               </Badge>
@@ -239,9 +241,7 @@ function Onboarding() {
                         </span>
                       </p>
 
-                      <p className="mt-2 text-xs text-slate-500 leading-snug">
-                        {p.descricao}
-                      </p>
+                      <p className="mt-2 text-xs text-slate-500 leading-snug">{p.descricao}</p>
 
                       <div className="mt-3 rounded-lg bg-slate-100 dark:bg-slate-800/80 p-2 text-[11px] text-slate-600 dark:text-slate-300 space-y-1">
                         <p className="font-semibold text-slate-900 dark:text-white">
@@ -282,7 +282,10 @@ function Onboarding() {
             <div className="mt-5 rounded-xl border border-amber-200 bg-amber-50/70 p-3 text-xs text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-200">
               <p className="font-semibold">Regra do Período de Teste:</p>
               <p className="mt-0.5">
-                O plano gratuito é válido por <strong>{DIAS_TRIAL_PADRAO} dias corridos</strong> a partir do cadastro. Ao final do período, você poderá escolher um plano comercial para continuar operando, a não ser que um administrador libere mais dias de teste para a sua conta.
+                O plano gratuito é válido por <strong>{DIAS_TRIAL_PADRAO} dias corridos</strong> a
+                partir do cadastro. Ao final do período, você poderá escolher um plano comercial
+                para continuar operando, a não ser que um administrador libere mais dias de teste
+                para a sua conta.
               </p>
             </div>
           </div>
@@ -290,8 +293,11 @@ function Onboarding() {
           {/* Botão de Envio */}
           <div className="flex flex-col sm:flex-row items-center justify-between gap-4 pt-2">
             <div className="text-xs text-slate-500 text-center sm:text-left">
-              Plano selecionado: <strong className="text-slate-800 dark:text-slate-200">{planoAtivo.nome}</strong>{" "}
-              {planoAtivo.codigo === "free" ? "(7 dias sem cobrança)" : `(${moeda(planoAtivo.mensalidade)}/mês)`}
+              Plano selecionado:{" "}
+              <strong className="text-slate-800 dark:text-slate-200">{planoAtivo.nome}</strong>{" "}
+              {planoAtivo.codigo === "free"
+                ? "(7 dias sem cobrança)"
+                : `(${moeda(planoAtivo.mensalidade)}/mês)`}
             </div>
 
             <Button

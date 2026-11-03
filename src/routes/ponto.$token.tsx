@@ -794,7 +794,16 @@ export function PaginaPonto() {
                     <span className="leading-relaxed">
                       <strong>Termo de Evidência Fotográfica:</strong> Autorizo a selfie para fins
                       exclusivos de conferência e auditoria humana do ponto pela supervisão, com
-                      exclusão automática no prazo de retenção da agência.
+                      exclusão automática no prazo de retenção da agência, em conformidade com a{" "}
+                      <a
+                        href="/privacidade"
+                        target="_blank"
+                        rel="noreferrer"
+                        className="underline text-blue-600 hover:text-blue-700"
+                      >
+                        LGPD e Portaria MTE 671/2021
+                      </a>
+                      .
                     </span>
                   </label>
                 ) : null}

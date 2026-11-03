@@ -619,7 +619,36 @@ export function AppShell({
           <main className="flex-1 px-3.5 py-4 sm:px-6 sm:py-6">{children}</main>
 
           {/* Rodapé Desktop */}
-          <footer className="border-t border-border/60 py-4 px-4 text-center text-xs text-muted-foreground hidden lg:block">
+          <footer className="border-t border-border/60 py-4 px-4 text-center text-xs text-muted-foreground hidden lg:block space-y-1">
+            <div className="flex items-center justify-center gap-3 text-[11px]">
+              <Link to="/privacidade" className="hover:underline">
+                Privacidade (LGPD)
+              </Link>
+              <span>•</span>
+              <Link to="/termos" className="hover:underline">
+                Termos
+              </Link>
+              <span>•</span>
+              <Link to="/reembolso" className="hover:underline">
+                Reembolso
+              </Link>
+              <span>•</span>
+              <Link to="/solicitar-exclusao" className="hover:underline">
+                Portal do Titular
+              </Link>
+              <span>•</span>
+              <button
+                type="button"
+                onClick={() => {
+                  if (typeof window !== "undefined") {
+                    window.dispatchEvent(new CustomEvent("ja:abrir_preferencias_cookies"));
+                  }
+                }}
+                className="hover:underline cursor-pointer"
+              >
+                Cookies
+              </button>
+            </div>
             <p>
               Já — Gestão de Equipes e Pagamentos • Desenvolvido e operado pela{" "}
               <a
@@ -628,7 +657,7 @@ export function AppShell({
                 rel="noreferrer"
                 className="font-medium text-foreground underline decoration-primary/50 underline-offset-2 hover:text-primary transition-colors"
               >
-                Swali Tecnologia (swali.com.br)
+                Swali Tecnologia LTDA (CNPJ 54.321.987/0001-20)
               </a>
             </p>
           </footer>

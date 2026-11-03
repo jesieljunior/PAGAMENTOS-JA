@@ -26,7 +26,7 @@ export interface PlanoItem {
 
 export const PLANOS_CATALOGO: PlanoItem[] = [
   {
-    id: "plano-trial-7dias",
+    id: "11111111-1111-4111-8111-111111111111",
     codigo: "free",
     nome: "Plano Gratuito (7 dias)",
     descricao:
@@ -49,7 +49,7 @@ export const PLANOS_CATALOGO: PlanoItem[] = [
     },
   },
   {
-    id: "plano-starter",
+    id: "22222222-2222-4222-8222-222222222222",
     codigo: "starter",
     nome: "Starter",
     descricao: "Para agências em expansão com foco em operações pontuais e equipes sob demanda.",
@@ -69,7 +69,7 @@ export const PLANOS_CATALOGO: PlanoItem[] = [
     },
   },
   {
-    id: "plano-pro",
+    id: "33333333-3333-4333-8333-333333333333",
     codigo: "pro",
     nome: "Profissional",
     descricao: "Para agências consolidadas com alto volume de escalas, eventos semanais e equipe.",
@@ -94,7 +94,7 @@ export const PLANOS_CATALOGO: PlanoItem[] = [
     },
   },
   {
-    id: "plano-enterprise",
+    id: "44444444-4444-4444-8444-444444444444",
     codigo: "enterprise",
     nome: "Corporativo",
     descricao: "Estrutura completa, franquia ampla, API aberta e atendimento preferencial.",

@@ -5,6 +5,7 @@ import type { Database, Tables } from "@/integrations/supabase/types";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { requireOrganizationContext } from "./autorizacao.server";
 import { calcularFatura } from "./cobranca-v2";
+import { PLANOS_CATALOGO } from "./planos-catalogo";
 
 type PlanoRow = Tables<"planos">;
 type FaturaRow = Tables<"faturas_plataforma">;
@@ -73,6 +74,33 @@ export const carregarCobranca = createServerFn({ method: "GET" })
             planosFinais = [] as PlanoRow[];
           }
         }
+      }
+
+      if (!planosFinais || !Array.isArray(planosFinais) || planosFinais.length === 0) {
+        planosFinais = PLANOS_CATALOGO.map((p, idx) => ({
+          id: p.id,
+          codigo: p.codigo,
+          nome: p.nome,
+          descricao: p.descricao,
+          mensalidade: p.mensalidade,
+          dias_trial: p.dias_trial,
+          participacoes_incluidas: p.participacoes_incluidas,
+          valor_excedente: p.valor_excedente,
+          limite_eventos_ciclo: p.limite_eventos_ciclo,
+          limite_pessoas_evento: p.limite_pessoas_evento,
+          limite_clt: p.limite_clt,
+          limite_supervisores: p.limite_supervisores,
+          retencao_evidencias_dias: 30,
+          aviso_vendas_acima: null,
+          recursos: p.recursos,
+          ativo: true,
+          ordem: idx + 1,
+          percentual: 0,
+          taxa_fixa_pix: 0,
+          modelo: "assinatura_percentual" as const,
+          criado_em: agora,
+          atualizado_em: agora,
+        })) as PlanoRow[];
       }
 
       const usoFallback: ResumoUso = {
@@ -229,7 +257,34 @@ export const carregarCobranca = createServerFn({ method: "GET" })
       ]);
 
       const resumo = uso?.data?.[0];
-      const listaPlanos = (planos?.data && planos.data.length > 0 ? planos.data : []) as PlanoRow[];
+      const listaPlanos = (
+        planos?.data && planos.data.length > 0
+          ? planos.data
+          : PLANOS_CATALOGO.map((p, idx) => ({
+              id: p.id,
+              codigo: p.codigo,
+              nome: p.nome,
+              descricao: p.descricao,
+              mensalidade: p.mensalidade,
+              dias_trial: p.dias_trial,
+              participacoes_incluidas: p.participacoes_incluidas,
+              valor_excedente: p.valor_excedente,
+              limite_eventos_ciclo: p.limite_eventos_ciclo,
+              limite_pessoas_evento: p.limite_pessoas_evento,
+              limite_clt: p.limite_clt,
+              limite_supervisores: p.limite_supervisores,
+              retencao_evidencias_dias: 30,
+              aviso_vendas_acima: null,
+              recursos: p.recursos,
+              ativo: true,
+              ordem: idx + 1,
+              percentual: 0,
+              taxa_fixa_pix: 0,
+              modelo: "assinatura_percentual" as const,
+              criado_em: agora,
+              atualizado_em: agora,
+            }))
+      ) as PlanoRow[];
 
       if (!resumo || !ciclo?.data) {
         return await fallbackRetorno(listaPlanos);
@@ -275,7 +330,7 @@ export const carregarCobranca = createServerFn({ method: "GET" })
  */
 export const selecionarPlanoEmpresa = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .validator((input: unknown) => z.object({ planoId: z.string().uuid() }).parse(input))
+  .validator((input: unknown) => z.object({ planoId: z.string().min(1) }).parse(input))
   .handler(async ({ data, context }) => {
     const org = requireOrganizationContext(context);
     const empresaId = org.empresaId;
@@ -284,7 +339,7 @@ export const selecionarPlanoEmpresa = createServerFn({ method: "POST" })
     const admin = await getAdminClientSafe();
     const client = context.supabase;
 
-    // Valida se o plano existe e está ativo
+    // Valida se o plano existe e está ativo no banco
     let { data: plano } = await client
       .from("planos")
       .select("*")
@@ -306,9 +361,47 @@ export const selecionarPlanoEmpresa = createServerFn({ method: "POST" })
       }
     }
 
+    // Se o banco ainda não tiver a tabela populada, resolve pelo catálogo oficial
+    if (!plano) {
+      const planoCat = PLANOS_CATALOGO.find(
+        (p) => p.id === data.planoId || p.codigo === data.planoId,
+      );
+      if (planoCat) {
+        plano = {
+          id: planoCat.id,
+          codigo: planoCat.codigo,
+          nome: planoCat.nome,
+          descricao: planoCat.descricao,
+          mensalidade: planoCat.mensalidade,
+          dias_trial: planoCat.dias_trial,
+          participacoes_incluidas: planoCat.participacoes_incluidas,
+          valor_excedente: planoCat.valor_excedente,
+          limite_eventos_ciclo: planoCat.limite_eventos_ciclo,
+          limite_pessoas_evento: planoCat.limite_pessoas_evento,
+          limite_clt: planoCat.limite_clt,
+          limite_supervisores: planoCat.limite_supervisores,
+          retencao_evidencias_dias: 30,
+          aviso_vendas_acima: null,
+          recursos: planoCat.recursos,
+          ativo: true,
+          ordem: 1,
+          percentual: 0,
+          taxa_fixa_pix: 0,
+          modelo: "assinatura_percentual" as const,
+          criado_em: new Date().toISOString(),
+          atualizado_em: new Date().toISOString(),
+        } as PlanoRow;
+      }
+    }
+
     if (!plano) {
       throw new Error("Plano selecionado não encontrado ou inativo.");
     }
+
+    const ehGratuito = plano.codigo === "free" || plano.mensalidade === 0;
+    const trialAte = ehGratuito
+      ? new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString()
+      : null;
 
     // Consulta assinatura existente da agência
     let { data: assinaturaExistente } = await client
@@ -330,25 +423,24 @@ export const selecionarPlanoEmpresa = createServerFn({ method: "POST" })
       }
     }
 
+    const patchAssinatura = {
+      plano_id: plano.id,
+      status: ehGratuito ? "trial" : "ativa",
+      trial_ate: trialAte,
+      atualizado_em: new Date().toISOString(),
+    };
+
     if (assinaturaExistente) {
       const { error: erroUpdate } = await client
         .from("assinaturas")
-        .update({
-          plano_id: plano.id,
-          status: "ativa",
-          atualizado_em: new Date().toISOString(),
-        })
+        .update(patchAssinatura)
         .eq("id", assinaturaExistente.id);
 
       if (erroUpdate && admin) {
         try {
           const { error: erroAdmin } = await admin
             .from("assinaturas")
-            .update({
-              plano_id: plano.id,
-              status: "ativa",
-              atualizado_em: new Date().toISOString(),
-            })
+            .update(patchAssinatura)
             .eq("id", assinaturaExistente.id);
           if (erroAdmin) throw new Error(erroAdmin.message);
         } catch {
@@ -359,7 +451,8 @@ export const selecionarPlanoEmpresa = createServerFn({ method: "POST" })
       const { error: erroInsert } = await client.from("assinaturas").insert({
         empresa_id: empresaId,
         plano_id: plano.id,
-        status: "ativa",
+        status: ehGratuito ? "trial" : "ativa",
+        trial_ate: trialAte,
       });
 
       if (erroInsert && admin) {
@@ -367,7 +460,8 @@ export const selecionarPlanoEmpresa = createServerFn({ method: "POST" })
           const { error: erroAdmin } = await admin.from("assinaturas").insert({
             empresa_id: empresaId,
             plano_id: plano.id,
-            status: "ativa",
+            status: ehGratuito ? "trial" : "ativa",
+            trial_ate: trialAte,
           });
           if (erroAdmin) throw new Error(erroAdmin.message);
         } catch {

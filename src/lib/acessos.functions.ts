@@ -63,7 +63,7 @@ async function criarUsuario(
 
 export const criarAcessoEquipe = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((input: unknown) =>
+  .validator((input: unknown) =>
     z
       .object({
         nome: z.string().trim().min(2).max(120),
@@ -99,7 +99,7 @@ export const criarAcessoEquipe = createServerFn({ method: "POST" })
 
 export const criarAcessosTeste = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((input: unknown) => z.object({ empresaId: z.string().uuid() }).parse(input))
+  .validator((input: unknown) => z.object({ empresaId: z.string().uuid() }).parse(input))
   .handler(async ({ data, context }) => {
     requirePlatformContext(context);
     const { data: papel } = await context.supabase

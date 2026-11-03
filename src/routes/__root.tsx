@@ -11,6 +11,7 @@ import {
 import { useEffect, useMemo, type ReactNode } from "react";
 
 import appCss from "../styles.css?url";
+import { CookieConsentBanner } from "@/components/cookie-consent-banner";
 import { supabase } from "@/integrations/supabase/client";
 import { Toaster } from "@/components/ui/sonner";
 
@@ -150,8 +151,16 @@ function RootComponent() {
 
   return (
     <QueryClientProvider client={queryClient}>
+      {/* Link de Acessibilidade WCAG 2.1 AA para navegação por teclado */}
+      <a
+        href="#conteudo-principal"
+        className="sr-only focus:not-sr-only focus:fixed focus:top-3 focus:left-3 focus:z-50 focus:bg-blue-600 focus:text-white focus:px-4 focus:py-2 focus:rounded-lg focus:shadow-xl focus:ring-2 focus:ring-white focus:outline-none font-semibold text-xs"
+      >
+        Pular para o conteúdo principal
+      </a>
       {/* Required: nested routes render here. Removing <Outlet /> breaks all child routes. */}
       <Outlet />
+      <CookieConsentBanner />
       <Toaster />
     </QueryClientProvider>
   );

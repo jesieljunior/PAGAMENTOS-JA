@@ -119,3 +119,12 @@ export const supabaseAdmin = new Proxy({} as ReturnType<typeof createSupabaseAdm
     return Reflect.get(_supabaseAdmin, prop, receiver);
   },
 });
+
+export function getAdminClientSafe(): ReturnType<typeof createSupabaseAdminClient> | null {
+  try {
+    if (!hasAdminKey()) return null;
+    return supabaseAdmin;
+  } catch {
+    return null;
+  }
+}
