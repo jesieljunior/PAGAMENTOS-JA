@@ -1,6 +1,6 @@
 # Já — Gestão de Equipes e Pagamentos
 
-[![CI](https://github.com/amarusdeveloper/PAGAMENTOS-JA/actions/workflows/ci.yml/badge.svg)](https://github.com/amarusdeveloper/PAGAMENTOS-JA/actions/workflows/ci.yml)
+[![CI](https://github.com/amarusdeveloper/PAGAMENTOS-JA/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/amarusdeveloper/PAGAMENTOS-JA/actions/workflows/ci.yml)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.9-blue.svg)](https://www.typescriptlang.org/)
 [![React](https://img.shields.io/badge/React-19-61dafb.svg)](https://react.dev/)
 [![TanStack Start](https://img.shields.io/badge/TanStack_Start-1.121-orange.svg)](https://tanstack.com/start)
@@ -239,6 +239,7 @@ O encerramento do ponto conecta-se diretamente à esteira de tesouraria e repass
 
 ```bash
 git clone https://github.com/amarusdeveloper/PAGAMENTOS-JA.git
+# Ou via o seu fork/repositório pessoal: git clone https://github.com/<SEU_USUARIO>/PAGAMENTOS-JA.git
 cd PAGAMENTOS-JA
 ```
 
@@ -293,31 +294,31 @@ npm run build
 
 ## 🚢 Como Implantar na Vercel
 
-1. No painel da **[Vercel](https://vercel.com/)**, selecione o repositório `amarusdeveloper/PAGAMENTOS-JA`.
+1. No painel da **[Vercel](https://vercel.com/)**, selecione o seu repositório Git importado (`PAGAMENTOS-JA`).
 2. O framework preset será reconhecido automaticamente via `vercel.json`.
-3. Nas **Environment Variables** da Vercel, adicione:
-   - `SUPABASE_PROJECT_ID`: `rutmjtmirwcyoroyjqdy`
-   - `SUPABASE_URL`: `https://rutmjtmirwcyoroyjqdy.supabase.co`
-   - `SUPABASE_PUBLISHABLE_KEY`: _(sua chave publicável Supabase)_
+3. Nas **Environment Variables** da Vercel, adicione suas credenciais:
+   - `SUPABASE_PROJECT_ID`: _(ID do seu projeto Supabase, ex.: `abcdefghijklmnopqrst`)_
+   - `SUPABASE_URL`: `https://<seu-projeto>.supabase.co`
+   - `SUPABASE_PUBLISHABLE_KEY`: _(sua chave publicável Supabase — anon key)_
    - `SUPABASE_SERVICE_ROLE_KEY`: _(chave `service_role` ou `sb_secret_`; somente servidor, nunca use prefixo `VITE_`)_
-   - `VITE_SUPABASE_PROJECT_ID`: `rutmjtmirwcyoroyjqdy`
-   - `VITE_SUPABASE_URL`: `https://rutmjtmirwcyoroyjqdy.supabase.co`
+   - `VITE_SUPABASE_PROJECT_ID`: _(mesmo ID do projeto para o cliente web)_
+   - `VITE_SUPABASE_URL`: `https://<seu-projeto>.supabase.co`
    - `VITE_SUPABASE_PUBLISHABLE_KEY`: _(sua chave publicável Supabase)_
-   - `ASAAS_API_KEY`: _(sua chave de API de produção do Asaas)_
-   - `ASAAS_AMBIENTE`: `producao`
-   - `ASAAS_WEBHOOK_TOKEN`: _(seu token de validação de webhook)_
-4. Execute as migrações SQL pendentes no projeto Supabase.
-5. Publique a Edge Function do ponto usando a CLI:
+   - `ASAAS_API_KEY`: _(sua chave de API Asaas — Sandbox para testes ou `$aact_...` para produção)_
+   - `ASAAS_AMBIENTE`: `sandbox` _(padrão oficial para testes, demonstração e avaliação técnica)_ ou `producao`
+   - `ASAAS_WEBHOOK_TOKEN`: _(token de validação de webhooks gerado no painel Asaas)_
+4. Execute as migrações SQL no banco PostgreSQL via painel do Supabase ou CLI.
+5. Publique a Edge Function do ponto público usando a CLI do Supabase:
 
    ```bash
    npx supabase login
-   npx supabase link --project-ref rutmjtmirwcyoroyjqdy
+   npx supabase link --project-ref <seu-projeto-id>
    npx supabase functions deploy ponto-publico
    ```
 
-   A função usa `SUPABASE_URL` e `SUPABASE_SERVICE_ROLE_KEY` do ambiente protegido do Supabase. A chamada pública não exige JWT de usuário; os registros continuam validados e gravados no servidor.
+   A função utiliza `SUPABASE_URL` e `SUPABASE_SERVICE_ROLE_KEY` do ambiente protegido do Supabase. A chamada pública de ponto não exige JWT de usuário logado; todas as regras e marcações são estritamente validadas e gravadas pelo servidor.
 
-6. Faça um novo deploy da aplicação Vercel para publicar o cliente que chama a Edge Function. Essa alteração remove a dependência da chave administrativa no fluxo público de ponto; outros recursos do sistema que usam operações administrativas ainda podem depender de `SUPABASE_SERVICE_ROLE_KEY` na Vercel.
+6. Faça o deploy da aplicação na Vercel para publicar o cliente web. As chamadas públicas de ponto passam pela Edge Function, mantendo zero chaves privilegiadas expostas no navegador.
 
 ---
 
@@ -329,7 +330,7 @@ npm run build
 
 ---
 
-## 📄 Titularidade e Licença
+## 📄 Titularidade, Propriedade Intelectual e Licença
 
-**Já — Gestão de Equipes e Pagamentos** é uma plataforma corporativa SaaS B2B desenvolvida e operada pela **[Swali](https://www.swali.com.br/)**.  
-Distribuído sob a licença [MIT](LICENSE).
+- **Produto e Marca:** **Já — Gestão de Equipes e Pagamentos** é uma plataforma e propriedade intelectual comercial desenvolvida e operada pela **[Swali Tecnologia LTDA](https://www.swali.com.br/)**. Todos os direitos comerciais, marcas e serviços associados são reservados.
+- **Licenciamento do Código (Portfólio & Demonstração Técnica):** O código-fonte deste repositório é disponibilizado publicamente sob a licença [MIT](LICENSE) estritamente para fins de demonstração técnica, auditoria arquitetural, portfólio de engenharia de software e avaliação de competências técnicas.

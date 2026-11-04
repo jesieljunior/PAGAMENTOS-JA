@@ -1,5 +1,6 @@
 {
   "name": "pagamentos-ja",
+  "description": "Plataforma B2B para agências de eventos: gestão de escalas, ponto digital antifraude com selfie/geofencing e repasses automáticos via Pix.",
   "private": true,
   "sideEffects": false,
   "type": "module",
