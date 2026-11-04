@@ -621,24 +621,59 @@ export const confirmarPresenca = createServerFn({ method: "POST" })
       );
     } catch {
       const sessao = buscarSessaoEventoPorToken(data.token);
+      const cpfLimpo = data.cpf.replace(/\D/g, "");
+      const agoraIso = new Date().toISOString();
+
       if (sessao) {
-        const cpfLimpo = data.cpf.replace(/\D/g, "");
         const escala = sessao.escalas.find((e) => e.cpf.replace(/\D/g, "") === cpfLimpo);
         if (escala) {
           atualizarStatusEscalaSessao(data.token, escala.escalaId, "confirmado");
-          if (sessao.authHeader) {
-            try {
-              const authClient = criarSupabaseClientComAuth(sessao.authHeader);
-              await authClient
-                .from("escalas")
-                .update({ status: "confirmado", confirmado_em: new Date().toISOString() })
-                .eq("id", escala.escalaId);
-            } catch {
-              // não-bloqueante
+        }
+      }
+
+      try {
+        const { hasAdminKey, supabaseAdmin } =
+          await import("@/integrations/supabase/client.server");
+        const dbClient = sessao?.authHeader
+          ? criarSupabaseClientComAuth(sessao.authHeader)
+          : hasAdminKey()
+            ? supabaseAdmin
+            : null;
+
+        if (dbClient) {
+          const { data: evento } = await dbClient
+            .from("eventos")
+            .select("id, empresa_id")
+            .eq("qr_code_token", data.token)
+            .maybeSingle();
+
+          if (evento) {
+            const { data: freela } = await dbClient
+              .from("freelancers")
+              .select("id")
+              .eq("empresa_id", evento.empresa_id)
+              .eq("cpf", cpfLimpo)
+              .maybeSingle();
+
+            if (freela) {
+              const { data: equipes } = await dbClient
+                .from("equipes")
+                .select("id")
+                .eq("evento_id", evento.id);
+              const eqIds = (equipes ?? []).map((e) => e.id);
+              if (eqIds.length > 0) {
+                await dbClient
+                  .from("escalas")
+                  .update({ status: "confirmado", confirmado_em: agoraIso })
+                  .eq("freelancer_id", freela.id)
+                  .in("equipe_id", eqIds)
+                  .eq("status", "convidado");
+              }
             }
           }
-          return { ok: true as const };
         }
+      } catch (err) {
+        console.warn("[ponto] Falha ao confirmar presença no banco:", err);
       }
 
       return { ok: true as const };
@@ -720,151 +755,210 @@ export const registrarPonto = createServerFn({ method: "POST" })
         z.object({ ok: z.literal(true), foraHorario: z.boolean() }),
       );
     } catch {
+      // 3. Fallback nativo resiliente a serverless / instâncias múltiplas
       const sessao = buscarSessaoEventoPorToken(data.token);
+      const assinado = decodificarTokenQrCode(data.token);
       const agora = new Date();
       const agoraIso = agora.toISOString();
 
-      if (sessao) {
+      // Resolve cliente com permissão de escrita
+      const { hasAdminKey, supabaseAdmin } = await import("@/integrations/supabase/client.server");
+      const dbClient = sessao?.authHeader
+        ? criarSupabaseClientComAuth(sessao.authHeader)
+        : hasAdminKey()
+          ? supabaseAdmin
+          : null;
+
+      // 1. Resolve o evento e valida expiração do QR Code
+      let eventoId = sessao?.eventoId ?? assinado?.eventoId;
+      let empresaId = sessao?.empresaId;
+      let dataFim = sessao?.data_fim ?? assinado?.data_fim ?? null;
+      let qrCodeExpiraEm = sessao?.qr_code_expira_em ?? assinado?.qr_code_expira_em ?? null;
+      let exigeSelfie = sessao?.exigeSelfie ?? assinado?.exigeSelfie ?? false;
+      let exigeGps = sessao?.exigeGps ?? assinado?.exigeGps ?? false;
+      let pontoBasico = sessao?.pontoBasico ?? assinado?.pontoBasico ?? false;
+      let selfieRetencaoDias = 90;
+
+      if (!eventoId || !empresaId) {
+        const queryClient = dbClient ?? createSupabasePublicClient();
+        const { data: eventoDb, error: erroEvento } = await queryClient
+          .from("eventos")
+          .select("id, empresa_id, data_fim, qr_code_expira_em, qr_code_gerado_em, criado_em")
+          .eq("qr_code_token", data.token)
+          .maybeSingle();
+
+        if (erroEvento || !eventoDb) {
+          throw new Error(
+            "QR Code não encontrado ou expirado. Peça ao supervisor para renovar o código.",
+          );
+        }
+        eventoId = eventoDb.id;
+        empresaId = eventoDb.empresa_id;
+        dataFim = eventoDb.data_fim;
+        qrCodeExpiraEm = eventoDb.qr_code_expira_em;
+
+        validarValidadeQr(eventoDb);
+
+        const { data: config } = await queryClient
+          .from("configuracoes")
+          .select("checkin_exige_selfie, checkin_exige_gps, selfie_retencao_dias")
+          .eq("empresa_id", eventoDb.empresa_id)
+          .maybeSingle();
+
+        exigeSelfie = Boolean(config?.checkin_exige_selfie);
+        exigeGps = Boolean(config?.checkin_exige_gps);
+        selfieRetencaoDias = config?.selfie_retencao_dias ?? 90;
+
+        try {
+          const { data: plano } = await queryClient.rpc("plano_da_empresa", {
+            _empresa_id: eventoDb.empresa_id,
+          });
+          pontoBasico = plano?.codigo === "free";
+        } catch {
+          pontoBasico = false;
+        }
+      } else {
         validarValidadeQr({
-          data_fim: sessao.data_fim,
-          qr_code_expira_em: sessao.qr_code_expira_em,
+          data_fim: dataFim,
+          qr_code_expira_em: qrCodeExpiraEm,
         });
+      }
 
-        if (sessao.exigeSelfie && !data.fotoBase64) {
-          throw new Error("Esta agência exige selfie no registro de ponto.");
-        }
-        if (sessao.exigeSelfie && data.consentiuSelfie !== true) {
-          throw new Error("Confirme o uso da selfie para revisão do registro.");
-        }
-        if (
-          sessao.exigeGps &&
-          (data.lat === null ||
-            data.lat === undefined ||
-            data.lng === null ||
-            data.lng === undefined)
-        ) {
-          throw new Error("Esta agência exige a localização no registro de ponto.");
-        }
+      // 2. Validações de evidências
+      if (exigeSelfie && !data.fotoBase64) {
+        throw new Error("Esta agência exige selfie no registro de ponto.");
+      }
+      if (exigeSelfie && data.consentiuSelfie !== true) {
+        throw new Error("Confirme o uso da selfie para revisão do registro.");
+      }
+      if (
+        exigeGps &&
+        (data.lat === null || data.lat === undefined || data.lng === null || data.lng === undefined)
+      ) {
+        throw new Error("Esta agência exige a localização no registro de ponto.");
+      }
 
-        // Validação da ordem sequencial
-        const existentes = sessao.pontos.filter(
+      // 3. Validação da escala e integridade da sequência de marcações
+      const sequenciaCompleta = ["entrada", "inicio_intervalo", "fim_intervalo", "saida"] as const;
+      const sequencia = pontoBasico ? ["entrada", "saida"] : sequenciaCompleta;
+
+      let existentes: Array<{ tipo: string }> = [];
+      if (dbClient) {
+        const { data: pontosDb } = await dbClient
+          .from("pontos")
+          .select("tipo")
+          .eq("escala_id", data.escalaId)
+          .neq("status", "recusado")
+          .order("registrado_em");
+        if (pontosDb && pontosDb.length > 0) {
+          existentes = pontosDb;
+        } else if (sessao) {
+          existentes = sessao.pontos.filter(
+            (p) => p.escalaId === data.escalaId && p.status !== "recusado",
+          );
+        }
+      } else if (sessao) {
+        existentes = sessao.pontos.filter(
           (p) => p.escalaId === data.escalaId && p.status !== "recusado",
         );
-        const sequenciaCompleta = [
-          "entrada",
-          "inicio_intervalo",
-          "fim_intervalo",
-          "saida",
-        ] as const;
-        const sequencia = sessao.pontoBasico ? ["entrada", "saida"] : sequenciaCompleta;
-        const esperado = sequencia[existentes.length];
+      }
 
-        if (!esperado) {
-          throw new Error("Todos os registros desta escala já foram concluídos.");
-        }
-        if (data.tipo !== esperado) {
-          throw new Error(`O próximo registro deve ser ${esperado.replaceAll("_", " ")}.`);
-        }
+      const esperado = sequencia[existentes.length];
+      if (!esperado) {
+        throw new Error("Todos os registros desta escala já foram concluídos.");
+      }
+      if (data.tipo !== esperado) {
+        throw new Error(`O próximo registro deve ser ${esperado.replaceAll("_", " ")}.`);
+      }
 
-        const foraHorario = Boolean(sessao.data_fim && agora > new Date(sessao.data_fim));
-        let fotoUrl: string | null = null;
-        let novoId: string = crypto.randomUUID();
+      const foraHorario = Boolean(dataFim && agora > new Date(dataFim));
+      let fotoUrl: string | null = null;
+      let novoId: string = crypto.randomUUID();
 
-        // Se houver authHeader, insere no Supabase
-        if (sessao.authHeader) {
-          try {
-            const authClient = criarSupabaseClientComAuth(sessao.authHeader);
-
-            // Upload de selfie se fornecida
-            if (data.fotoBase64) {
-              try {
-                const partesFoto = /^data:image\/(jpeg|png|webp);base64,([A-Za-z0-9+/=]+)$/.exec(
-                  data.fotoBase64,
-                );
-                if (partesFoto) {
-                  const formato = partesFoto[1];
-                  const bytes = Uint8Array.from(Buffer.from(partesFoto[2]!, "base64"));
-                  const caminho = `${sessao.empresaId}/${data.escalaId}/${crypto.randomUUID()}.${formato === "jpeg" ? "jpg" : formato}`;
-                  const { error: erroUpload } = await authClient.storage
-                    .from("selfies-ponto")
-                    .upload(caminho, bytes, { contentType: `image/${formato}`, upsert: false });
-                  if (!erroUpload) {
-                    fotoUrl = caminho;
-                  } else {
-                    fotoUrl = data.fotoBase64;
-                  }
-                } else {
-                  fotoUrl = data.fotoBase64;
-                }
-              } catch {
-                fotoUrl = data.fotoBase64;
-              }
-            }
-            if (!fotoUrl && data.fotoBase64) {
+      // 4. Upload de selfie como evidência para conferência humana (se fornecida)
+      if (data.fotoBase64 && dbClient) {
+        try {
+          const partesFoto = /^data:image\/(jpeg|png|webp);base64,([A-Za-z0-9+/=]+)$/.exec(
+            data.fotoBase64,
+          );
+          if (partesFoto) {
+            const formato = partesFoto[1];
+            const bytes = Uint8Array.from(Buffer.from(partesFoto[2]!, "base64"));
+            const caminho = `${empresaId}/${data.escalaId}/${crypto.randomUUID()}.${formato === "jpeg" ? "jpg" : formato}`;
+            const { error: erroUpload } = await dbClient.storage
+              .from("selfies-ponto")
+              .upload(caminho, bytes, { contentType: `image/${formato}`, upsert: false });
+            if (!erroUpload) {
+              fotoUrl = caminho;
+            } else {
               fotoUrl = data.fotoBase64;
             }
-
-            const { data: pontoGravado } = await authClient
-              .from("pontos")
-              .insert({
-                escala_id: data.escalaId,
-                tipo: data.tipo,
-                metodo: data.fotoBase64 ? "selfie" : "qrcode",
-                registrado_em: agoraIso,
-                foto_url: fotoUrl,
-                gps_lat: data.lat ?? null,
-                gps_lng: data.lng ?? null,
-                status: "pendente",
-                fora_horario: foraHorario,
-                selfie_consentimento_aceito_em: data.fotoBase64 ? agoraIso : null,
-                selfie_expira_em: data.fotoBase64
-                  ? new Date(agora.getTime() + 90 * 24 * 60 * 60_000).toISOString()
-                  : null,
-              })
-              .select("id")
-              .single();
-
-            if (pontoGravado?.id) {
-              novoId = pontoGravado.id;
-            }
-          } catch (syncErr) {
-            console.warn("[ponto] Gravação direta falhou, salvando na sessão:", syncErr);
-          }
-        }
-
-        // Se ainda não gravou no banco e houver chave administrativa disponível, grava via admin
-        try {
-          const { hasAdminKey, supabaseAdmin } =
-            await import("@/integrations/supabase/client.server");
-          if (hasAdminKey()) {
-            const { data: adminPonto } = await supabaseAdmin
-              .from("pontos")
-              .insert({
-                escala_id: data.escalaId,
-                tipo: data.tipo,
-                metodo: data.fotoBase64 ? "selfie" : "qrcode",
-                registrado_em: agoraIso,
-                foto_url: fotoUrl,
-                gps_lat: data.lat ?? null,
-                gps_lng: data.lng ?? null,
-                status: "pendente",
-                fora_horario: foraHorario,
-                selfie_consentimento_aceito_em: data.fotoBase64 ? agoraIso : null,
-                selfie_expira_em: data.fotoBase64
-                  ? new Date(agora.getTime() + 90 * 24 * 60 * 60_000).toISOString()
-                  : null,
-              })
-              .select("id")
-              .maybeSingle();
-
-            if (adminPonto?.id) {
-              novoId = adminPonto.id;
-            }
+          } else {
+            fotoUrl = data.fotoBase64;
           }
         } catch {
-          // Continua com fallback na sessão
+          fotoUrl = data.fotoBase64;
+        }
+      } else if (data.fotoBase64) {
+        fotoUrl = data.fotoBase64;
+      }
+
+      // 5. Persistência da marcação no banco de dados
+      if (dbClient) {
+        const { data: pontoGravado, error: erroGravacao } = await dbClient
+          .from("pontos")
+          .insert({
+            escala_id: data.escalaId,
+            tipo: data.tipo,
+            metodo: data.fotoBase64 ? "selfie" : "qrcode",
+            registrado_em: agoraIso,
+            foto_url: fotoUrl,
+            gps_lat: data.lat ?? null,
+            gps_lng: data.lng ?? null,
+            status: "pendente",
+            fora_horario: foraHorario,
+            selfie_consentimento_aceito_em: data.fotoBase64 ? agoraIso : null,
+            selfie_expira_em: data.fotoBase64
+              ? new Date(agora.getTime() + selfieRetencaoDias * 24 * 60 * 60_000).toISOString()
+              : null,
+          })
+          .select("id")
+          .single();
+
+        if (erroGravacao) {
+          console.error("[ponto] Erro ao gravar ponto no banco:", erroGravacao);
+          throw new Error("Não foi possível persistir a marcação de ponto. Tente novamente.");
         }
 
+        if (pontoGravado?.id) {
+          novoId = pontoGravado.id;
+        }
+
+        // 6. Auditoria de ponto público
+        try {
+          await dbClient.from("auditoria_ponto_publico").insert({
+            empresa_id: empresaId,
+            escala_id: data.escalaId,
+            ponto_id: novoId,
+            acao: "ponto_registrado",
+            resultado: "sucesso",
+            detalhes: {
+              tipo: data.tipo,
+              fora_horario: foraHorario,
+              com_selfie: Boolean(data.fotoBase64),
+            },
+          });
+        } catch (auditoriaErr) {
+          console.warn("[ponto] Não foi possível gravar auditoria pública:", auditoriaErr);
+        }
+      } else if (!sessao) {
+        throw new Error(
+          "Não foi possível conectar com o banco de dados para registrar o ponto. Notifique o supervisor.",
+        );
+      }
+
+      // 7. Sincroniza sessão em memória para respostas rápidas na mesma instância
+      if (sessao) {
         adicionarPontoSessao(data.token, {
           id: novoId,
           escalaId: data.escalaId,
@@ -876,13 +970,8 @@ export const registrarPonto = createServerFn({ method: "POST" })
           gps_lat: data.lat ?? null,
           gps_lng: data.lng ?? null,
         });
-
-        return { ok: true as const, foraHorario };
       }
 
-      // 3. Fallback nativo
-      throw new Error(
-        "Sessão de ponto não inicializada. Peça ao supervisor para abrir o painel de ponto do evento.",
-      );
+      return { ok: true as const, foraHorario };
     }
   });

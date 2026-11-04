@@ -271,7 +271,7 @@ npm run dev
 A integridade do código é mantida através de comandos padronizados:
 
 ```bash
-# Executar todos os 99 testes automatizados (Vitest)
+# Executar todos os 128 testes automatizados (Vitest)
 npm run test
 
 # Verificação estática de tipos (TypeScript)

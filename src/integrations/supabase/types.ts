@@ -2530,7 +2530,14 @@ export type Database = {
         | "paid"
         | "failed"
         | "cancelled";
-      status_pagamento: "pendente" | "agendado" | "executado" | "falhou";
+      status_pagamento:
+        | "pendente"
+        | "agendado"
+        | "processando"
+        | "aguardando_aprovacao"
+        | "executado"
+        | "falhou"
+        | "estornado";
       status_ponto: "pendente" | "aprovado" | "recusado";
       status_taxa: "pendente" | "cobrada" | "isenta";
       tipo_cobranca: "aporte_agencia" | "cobranca_cliente";
@@ -2712,7 +2719,15 @@ export const Constants = {
         "failed",
         "cancelled",
       ],
-      status_pagamento: ["pendente", "agendado", "executado", "falhou"],
+      status_pagamento: [
+        "pendente",
+        "agendado",
+        "processando",
+        "aguardando_aprovacao",
+        "executado",
+        "falhou",
+        "estornado",
+      ],
       status_ponto: ["pendente", "aprovado", "recusado"],
       status_taxa: ["pendente", "cobrada", "isenta"],
       tipo_cobranca: ["aporte_agencia", "cobranca_cliente"],

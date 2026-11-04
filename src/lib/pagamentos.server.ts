@@ -66,6 +66,8 @@ export async function enviarPix(supabase: any, pagamentoId: string, empresaId?: 
     .maybeSingle();
   if (!pagamento) throw new Error("Pagamento não encontrado.");
   if (pagamento.status === "executado") throw new Error("Pagamento já executado.");
+  if (pagamento.status === "processando")
+    throw new Error("Pagamento já em processamento pelo Asaas. Aguarde a confirmação.");
 
   const primeiro = <T>(v: T | T[] | null | undefined): T | null =>
     Array.isArray(v) ? (v[0] ?? null) : (v ?? null);
@@ -111,27 +113,77 @@ export async function enviarPix(supabase: any, pagamentoId: string, empresaId?: 
       chaveIdempotencia: pagamento.chave_idempotencia,
     });
 
-    await supabase
+    // Avalia se o status retornado pelo Asaas é terminal ou intermediário
+    const statusAsaas = (transferencia.status ?? "").toUpperCase();
+    let statusFinal: "executado" | "processando" | "aguardando_aprovacao" | "pendente" =
+      "processando";
+    let executadoEm: string | null = null;
+    let erroMsg: string | null = null;
+
+    if (statusAsaas === "DONE" || statusAsaas === "CONFIRMED") {
+      statusFinal = "executado";
+      executadoEm = new Date().toISOString();
+    } else if (statusAsaas === "AWAITING_CRITICAL_ACTION_AUTHORIZATION") {
+      statusFinal = "aguardando_aprovacao";
+      erroMsg = "Aguardando autorização de segurança 2FA no Asaas.";
+    } else {
+      // PENDING, BANK_PROCESSING, etc.
+      statusFinal = "processando";
+    }
+
+    const payloadAtualizacao: Record<string, unknown> = {
+      status: statusFinal,
+      executado_em: executadoEm,
+      txid_parceiro: transferencia.id,
+      parceiro_transferencia_id: transferencia.id,
+      chave_pix_destino: chavePix,
+      erro: erroMsg,
+    };
+
+    let { error: errUpdate } = await supabase
       .from("pagamentos")
-      .update({
-        status: "executado",
-        executado_em: new Date().toISOString(),
-        txid_parceiro: transferencia.id,
-        parceiro_transferencia_id: transferencia.id,
-        chave_pix_destino: chavePix,
-        erro: null,
-      })
+      .update(payloadAtualizacao)
       .eq("id", pagamento.id);
 
-    await supabase.from("movimentos_saldo").insert({
-      empresa_id: empresaDestino,
-      tipo: "debito",
-      valor,
-      descricao: `Pix para ${freelancer?.nome ?? "freelancer"}`,
-      pagamento_id: pagamento.id,
-    });
+    // Fallback defensivo caso o banco ainda não tenha rodado a migration com os novos valores de enum
+    if (errUpdate && (statusFinal === "processando" || statusFinal === "aguardando_aprovacao")) {
+      const fallbackPayload = {
+        ...payloadAtualizacao,
+        status: "pendente",
+        erro: `[${statusFinal}] ${erroMsg ?? "Em processamento pelo Asaas"}`,
+      };
+      const resFallback = await supabase
+        .from("pagamentos")
+        .update(fallbackPayload)
+        .eq("id", pagamento.id);
+      errUpdate = resFallback.error;
+    }
+    if (errUpdate) throw errUpdate;
 
-    return { ok: true, txid: transferencia.id as string, taxa: 0 };
+    // Registra débito em conta para reservar os recursos (salvo se já tiver sido debitado)
+    const { data: movimentoExistente } = await supabase
+      .from("movimentos_saldo")
+      .select("id")
+      .eq("pagamento_id", pagamento.id)
+      .eq("tipo", "debito")
+      .maybeSingle();
+
+    if (!movimentoExistente) {
+      await supabase.from("movimentos_saldo").insert({
+        empresa_id: empresaDestino,
+        tipo: "debito",
+        valor,
+        descricao: `Pix para ${freelancer?.nome ?? "freelancer"}`,
+        pagamento_id: pagamento.id,
+      });
+    }
+
+    return {
+      ok: true,
+      txid: transferencia.id as string,
+      status: statusFinal,
+      taxa: 0,
+    };
   } catch (e) {
     const mensagem = e instanceof Error ? e.message : "Falha ao enviar o Pix.";
     await supabase

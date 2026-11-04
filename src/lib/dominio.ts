@@ -458,8 +458,11 @@ export const ROTULO_STATUS_FECHAMENTO: Record<StatusFechamento, string> = {
 export const ROTULO_STATUS_PAGAMENTO: Record<StatusPagamento, string> = {
   pendente: "Pendente",
   agendado: "Agendado",
+  processando: "Processando",
+  aguardando_aprovacao: "Aguardando Aprovação",
   executado: "Pago",
   falhou: "Falhou",
+  estornado: "Estornado",
 };
 
 export const ROTULO_TIPO_VALOR: Record<TipoValor, string> = {
