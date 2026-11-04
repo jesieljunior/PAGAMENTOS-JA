@@ -104,6 +104,48 @@ export async function enviarPix(supabase: any, pagamentoId: string, empresaId?: 
         `Saldo insuficiente: disponível R$ ${Number(saldo ?? 0).toFixed(2)}, necessário R$ ${valor.toFixed(2)}. Adicione saldo para continuar.`,
       );
 
+    // 1. Bloqueio atômico de concorrência antes de chamar o parceiro Asaas
+    let travaAdquirida = false;
+    try {
+      const { data: rpcTrava, error: errRpcTrava } = await supabase.rpc(
+        "iniciar_processamento_pagamento_pix",
+        { _pagamento_id: pagamento.id },
+      );
+      if (!errRpcTrava && rpcTrava && typeof rpcTrava === "object") {
+        if (!rpcTrava.ok) {
+          throw new Error(rpcTrava.erro || "Pagamento já em processamento.");
+        }
+        travaAdquirida = true;
+      }
+    } catch (e) {
+      if (
+        e instanceof Error &&
+        !e.message.includes("function") &&
+        !e.message.includes("does not exist")
+      ) {
+        throw e;
+      }
+    }
+
+    if (!travaAdquirida) {
+      const { data: pagamentoLock, error: errLock } = await supabase
+        .from("pagamentos")
+        .update({
+          status: "processando",
+          atualizado_em: new Date().toISOString(),
+        })
+        .eq("id", pagamento.id)
+        .in("status", ["pendente", "agendado", "falhou"])
+        .select("id")
+        .maybeSingle();
+
+      if (errLock || !pagamentoLock) {
+        throw new Error(
+          "Pagamento já está sendo processado por outra solicitação ou não está pendente.",
+        );
+      }
+    }
+
     const { transferirPix } = await import("./asaas.server");
     const transferencia = await transferirPix({
       valor,
@@ -131,51 +173,96 @@ export async function enviarPix(supabase: any, pagamentoId: string, empresaId?: 
       statusFinal = "processando";
     }
 
-    const payloadAtualizacao: Record<string, unknown> = {
-      status: statusFinal,
-      executado_em: executadoEm,
-      txid_parceiro: transferencia.id,
-      parceiro_transferencia_id: transferencia.id,
-      chave_pix_destino: chavePix,
-      erro: erroMsg,
-    };
+    const descricaoDebito = `Pix para ${freelancer?.nome ?? "freelancer"}`;
 
-    let { error: errUpdate } = await supabase
-      .from("pagamentos")
-      .update(payloadAtualizacao)
-      .eq("id", pagamento.id);
-
-    // Fallback defensivo caso o banco ainda não tenha rodado a migration com os novos valores de enum
-    if (errUpdate && (statusFinal === "processando" || statusFinal === "aguardando_aprovacao")) {
-      const fallbackPayload = {
-        ...payloadAtualizacao,
-        status: "pendente",
-        erro: `[${statusFinal}] ${erroMsg ?? "Em processamento pelo Asaas"}`,
-      };
-      const resFallback = await supabase
-        .from("pagamentos")
-        .update(fallbackPayload)
-        .eq("id", pagamento.id);
-      errUpdate = resFallback.error;
+    // 2. Tenta efetivação transacional atômica via RPC no PostgreSQL
+    let efetivadoViaRpc = false;
+    try {
+      const { data: resEfetivacao, error: errEfetivacao } = await supabase.rpc(
+        "efetivar_pagamento_pix_db",
+        {
+          _pagamento_id: pagamento.id,
+          _empresa_id: empresaDestino,
+          _status_final: statusFinal,
+          _txid: transferencia.id ?? null,
+          _executado_em: executadoEm,
+          _erro: erroMsg,
+          _chave_pix: chavePix,
+          _descricao_debito: descricaoDebito,
+        },
+      );
+      if (!errEfetivacao && resEfetivacao?.ok) {
+        efetivadoViaRpc = true;
+      }
+    } catch {
+      efetivadoViaRpc = false;
     }
-    if (errUpdate) throw errUpdate;
 
-    // Registra débito em conta para reservar os recursos (salvo se já tiver sido debitado)
-    const { data: movimentoExistente } = await supabase
-      .from("movimentos_saldo")
-      .select("id")
-      .eq("pagamento_id", pagamento.id)
-      .eq("tipo", "debito")
-      .maybeSingle();
+    // 3. Fallback estruturado com verificação estrita caso a RPC não esteja presente
+    if (!efetivadoViaRpc) {
+      const payloadAtualizacao: Record<string, unknown> = {
+        status: statusFinal,
+        executado_em: executadoEm,
+        txid_parceiro: transferencia.id,
+        parceiro_transferencia_id: transferencia.id,
+        chave_pix_destino: chavePix,
+        erro: erroMsg,
+      };
 
-    if (!movimentoExistente) {
-      await supabase.from("movimentos_saldo").insert({
-        empresa_id: empresaDestino,
-        tipo: "debito",
-        valor,
-        descricao: `Pix para ${freelancer?.nome ?? "freelancer"}`,
-        pagamento_id: pagamento.id,
-      });
+      let { error: errUpdate } = await supabase
+        .from("pagamentos")
+        .update(payloadAtualizacao)
+        .eq("id", pagamento.id);
+
+      // Fallback defensivo caso o banco ainda não tenha rodado a migration com os novos valores de enum
+      if (errUpdate && (statusFinal === "processando" || statusFinal === "aguardando_aprovacao")) {
+        const fallbackPayload = {
+          ...payloadAtualizacao,
+          status: "pendente",
+          erro: `[${statusFinal}] ${erroMsg ?? "Em processamento pelo Asaas"}`,
+        };
+        const resFallback = await supabase
+          .from("pagamentos")
+          .update(fallbackPayload)
+          .eq("id", pagamento.id);
+        errUpdate = resFallback.error;
+      }
+      if (errUpdate) {
+        console.error("[pagamentos] Erro ao registrar status final do pagamento:", errUpdate);
+        throw errUpdate;
+      }
+
+      // Registra débito em conta protegido contra duplicação
+      const { data: movimentoExistente } = await supabase
+        .from("movimentos_saldo")
+        .select("id")
+        .eq("pagamento_id", pagamento.id)
+        .eq("tipo", "debito")
+        .maybeSingle();
+
+      if (!movimentoExistente) {
+        const { error: erroDebito } = await supabase.from("movimentos_saldo").insert({
+          empresa_id: empresaDestino,
+          tipo: "debito",
+          valor,
+          descricao: descricaoDebito,
+          pagamento_id: pagamento.id,
+        });
+
+        // 23505 = índice único parcial de débito já registrado por processo concorrente
+        if (erroDebito && erroDebito.code !== "23505") {
+          console.error("[pagamentos] Erro crítico ao inserir débito de saldo:", erroDebito);
+          await supabase
+            .from("pagamentos")
+            .update({
+              erro: `Atenção: Transferência criada (${transferencia.id}), mas falhou ao gravar débito contábil: ${erroDebito.message}`,
+            })
+            .eq("id", pagamento.id);
+          throw new Error(
+            `Transferência iniciada, mas falhou ao registrar débito contábil: ${erroDebito.message}`,
+          );
+        }
+      }
     }
 
     return {

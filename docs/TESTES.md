@@ -3,8 +3,8 @@
 **Data da Execução:** 04 de Novembro de 2026  
 **Runner:** Vitest v5.0.5  
 **Total de Arquivos de Teste:** 25 suítes  
-**Total de Testes:** 128 testes (100% de aprovação)  
-**Tempo de Execução:** ~8.9 segundos
+**Total de Testes:** 129 testes (100% de aprovação)  
+**Tempo de Execução:** ~8.7 segundos
 
 ---
 
@@ -37,13 +37,14 @@ npm run scan:secrets
    - Fail-closed de suporte: consultas de suporte falham sem chamado ativo.
    - Leitura de suporte: acesso estrito condicionado à sessão com trilha de auditoria.
 
-2. **`src/lib/webhook-idempotencia.test.ts` (6 testes)**
+2. **`src/lib/webhook-idempotencia.test.ts` (7 testes)**
    - Geração de chave idêntica para eventos duplicados Asaas.
    - Preservação de chave sob variações menores de payload.
    - Geração de chaves distintas para eventos ou cobranças diferentes.
    - Simulação de idempotência impedindo duplo crédito de saldo da agência.
    - Rejeição de webhooks com token ausente ou inválido (401 Unauthorized).
    - Tratamento de eventos fora de ordem sem corromper status terminal.
+   - Política de recuperação e retomada segura para eventos falhos ou timed-out com teto de tentativas.
 
 3. **`src/lib/autorizacao.test.ts` (10 testes)**
    - Validação da matriz RBAC para perfis `admin`, `coordenador`, `supervisor` e `financeiro`.

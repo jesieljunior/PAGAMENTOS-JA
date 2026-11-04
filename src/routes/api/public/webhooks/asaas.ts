@@ -36,7 +36,13 @@ export const Route = createFileRoute("/api/public/webhooks/asaas")({
         const chaveIdempotencia = gerarChaveWebhookAsaas(corpo);
 
         // 1. Aquisição atômica da chave de idempotência no banco ANTES de qualquer efeito financeiro.
-        // Se a chave já existir (requisição concorrente ou duplicada), o insert falha com erro 23505 (unique_violation)
+        let eventoExistente: {
+          id: string;
+          status: string;
+          tentativas?: number | null;
+          atualizado_em?: string | null;
+        } | null = null;
+
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const { error: erroIdempotencia } = await (supabaseAdmin as any)
           .from("webhook_eventos")
@@ -45,18 +51,71 @@ export const Route = createFileRoute("/api/public/webhooks/asaas")({
             evento: evento,
             payload: corpo,
             status: "processando",
+            tentativas: 1,
           });
 
         if (erroIdempotencia) {
           // Erro 23505 = chave de idempotência já adquirida/processada
           if (erroIdempotencia.code === "23505") {
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const { data: eventoDb } = await (supabaseAdmin as any)
+              .from("webhook_eventos")
+              .select("id, status, tentativas, atualizado_em")
+              .eq("chave_idempotencia", chaveIdempotencia)
+              .maybeSingle();
+
+            if (eventoDb) {
+              eventoExistente = eventoDb;
+            } else {
+              return new Response("ok", { status: 200 });
+            }
+          } else {
+            console.error(
+              "[webhook asaas] Erro ao registrar chave de idempotência:",
+              erroIdempotencia,
+            );
+            return new Response("Erro interno de concorrência", { status: 500 });
+          }
+        }
+
+        // Política de recuperação e retomada segura para eventos previamente registrados
+        if (eventoExistente) {
+          // Se já foi processado com sucesso, é terminal -> 200 OK
+          if (eventoExistente.status === "processado") {
             return new Response("ok", { status: 200 });
           }
-          console.error(
-            "[webhook asaas] Erro ao registrar chave de idempotência:",
-            erroIdempotencia,
-          );
-          return new Response("Erro interno de concorrência", { status: 500 });
+
+          const agoraMs = Date.now();
+          const atualizadoMs = new Date(eventoExistente.atualizado_em || Date.now()).getTime();
+          const timedOut = agoraMs - atualizadoMs > 5 * 60_000; // bloqueio preso há mais de 5 minutos
+          const tentativas = eventoExistente.tentativas ?? 1;
+
+          // Se falhou ou ficou preso em processando há muito tempo, retoma com limite de tentativas
+          if (
+            eventoExistente.status === "falhou" ||
+            eventoExistente.status === "falha" ||
+            timedOut
+          ) {
+            if (tentativas >= 5) {
+              console.warn(
+                `[webhook asaas] Evento ${chaveIdempotencia} atingiu o limite de ${tentativas} tentativas. Interrompendo reprocessamento.`,
+              );
+              return new Response("ok", { status: 200 });
+            }
+
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            await (supabaseAdmin as any)
+              .from("webhook_eventos")
+              .update({
+                status: "processando",
+                tentativas: tentativas + 1,
+                atualizado_em: new Date().toISOString(),
+              })
+              .eq("id", eventoExistente.id);
+          } else {
+            // Em processamento ativo por outra instância há menos de 5 min -> ignora duplicação simultânea
+            return new Response("ok", { status: 200 });
+          }
         }
 
         try {
@@ -153,56 +212,90 @@ export const Route = createFileRoute("/api/public/webhooks/asaas")({
                 ? "Transferência estornada pelo banco recebedor."
                 : "Transferência cancelada/recusada pelo banco.");
 
-            const { error: errUpdatePag } = await supabaseAdmin
-              .from("pagamentos")
-              .update({
-                status: statusFinal,
-                erro: motivo,
-              })
-              .eq("id", pagamentoId);
-
-            // Fallback se o enum do banco ainda não suportar 'estornado'
-            if (errUpdatePag && statusFinal === "estornado") {
-              await supabaseAdmin
-                .from("pagamentos")
-                .update({
-                  status: "falhou",
-                  erro: `[estornado] ${motivo}`,
-                })
-                .eq("id", pagamentoId);
+            const descricaoCredito = `Estorno de Pix (${evento === "TRANSFER_REVERSED" ? "estornado" : "recusado"})`;
+            let revertidoViaRpc = false;
+            try {
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+              const { data: resRpc, error: errRpc } = await (supabaseAdmin.rpc as any)(
+                "reverter_transferencia_pagamento_pix",
+                {
+                  _pagamento_id: pagamentoId,
+                  _status_final: statusFinal,
+                  _motivo: motivo,
+                  _descricao_credito: descricaoCredito,
+                },
+              );
+              if (
+                !errRpc &&
+                resRpc &&
+                typeof resRpc === "object" &&
+                (resRpc as { ok?: boolean }).ok
+              ) {
+                revertidoViaRpc = true;
+              }
+            } catch {
+              revertidoViaRpc = false;
             }
 
-            // Estorna o débito de saldo do Pix se já havia sido debitado e ainda não estornado
-            const { data: pagamento } = await supabaseAdmin
-              .from("pagamentos")
-              .select("id, valor, fechamento_id")
-              .eq("id", pagamentoId)
-              .maybeSingle();
+            if (!revertidoViaRpc) {
+              const { error: errUpdatePag } = await supabaseAdmin
+                .from("pagamentos")
+                .update({
+                  status: statusFinal,
+                  erro: motivo,
+                })
+                .eq("id", pagamentoId);
 
-            if (pagamento) {
-              const { data: movimentoDebito } = await supabaseAdmin
-                .from("movimentos_saldo")
-                .select("id, empresa_id")
-                .eq("pagamento_id", pagamento.id)
-                .eq("tipo", "debito")
+              // Fallback se o enum do banco ainda não suportar 'estornado'
+              if (errUpdatePag && statusFinal === "estornado") {
+                await supabaseAdmin
+                  .from("pagamentos")
+                  .update({
+                    status: "falhou",
+                    erro: `[estornado] ${motivo}`,
+                  })
+                  .eq("id", pagamentoId);
+              }
+
+              // Estorna o débito de saldo do Pix se já havia sido debitado e ainda não estornado
+              const { data: pagamento } = await supabaseAdmin
+                .from("pagamentos")
+                .select("id, valor, fechamento_id")
+                .eq("id", pagamentoId)
                 .maybeSingle();
 
-              if (movimentoDebito) {
-                const { data: estornoExistente } = await supabaseAdmin
+              if (pagamento) {
+                const { data: movimentoDebito } = await supabaseAdmin
                   .from("movimentos_saldo")
-                  .select("id")
+                  .select("id, empresa_id")
                   .eq("pagamento_id", pagamento.id)
-                  .eq("tipo", "credito")
+                  .eq("tipo", "debito")
                   .maybeSingle();
 
-                if (!estornoExistente) {
-                  await supabaseAdmin.from("movimentos_saldo").insert({
-                    empresa_id: movimentoDebito.empresa_id,
-                    tipo: "credito",
-                    valor: pagamento.valor,
-                    descricao: `Estorno de Pix (${evento === "TRANSFER_REVERSED" ? "estornado" : "recusado"})`,
-                    pagamento_id: pagamento.id,
-                  });
+                if (movimentoDebito) {
+                  const { data: estornoExistente } = await supabaseAdmin
+                    .from("movimentos_saldo")
+                    .select("id")
+                    .eq("pagamento_id", pagamento.id)
+                    .eq("tipo", "credito")
+                    .maybeSingle();
+
+                  if (!estornoExistente) {
+                    const { error: errEstorno } = await supabaseAdmin
+                      .from("movimentos_saldo")
+                      .insert({
+                        empresa_id: movimentoDebito.empresa_id,
+                        tipo: "credito",
+                        valor: pagamento.valor,
+                        descricao: descricaoCredito,
+                        pagamento_id: pagamento.id,
+                      });
+
+                    if (errEstorno && errEstorno.code !== "23505") {
+                      console.error("[webhook asaas] Erro ao gravar estorno contábil:", errEstorno);
+                      throw errEstorno;
+                    }
+                  }
                 }
               }
             }
@@ -214,17 +307,23 @@ export const Route = createFileRoute("/api/public/webhooks/asaas")({
             .from("webhook_eventos")
             .update({
               status: "processado",
+              erro: null,
+              atualizado_em: new Date().toISOString(),
             })
             .eq("chave_idempotencia", chaveIdempotencia);
 
           return new Response("ok", { status: 200 });
         } catch (procErr) {
+          const msgErro =
+            procErr instanceof Error ? procErr.message : "Erro no processamento do webhook";
           console.error("[webhook asaas] Erro ao processar evento:", procErr);
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           await (supabaseAdmin as any)
             .from("webhook_eventos")
             .update({
               status: "falhou",
+              erro: msgErro,
+              atualizado_em: new Date().toISOString(),
             })
             .eq("chave_idempotencia", chaveIdempotencia);
 

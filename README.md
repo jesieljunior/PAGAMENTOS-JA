@@ -5,7 +5,7 @@
 [![React](https://img.shields.io/badge/React-19-61dafb.svg)](https://react.dev/)
 [![TanStack Start](https://img.shields.io/badge/TanStack_Start-1.121-orange.svg)](https://tanstack.com/start)
 [![Supabase](https://img.shields.io/badge/Supabase-PostgreSQL_RLS-3ecf8e.svg)](https://supabase.com/)
-[![Tests](https://img.shields.io/badge/Tests-128_passing-brightgreen.svg)](docs/TESTES.md)
+[![Tests](https://img.shields.io/badge/Tests-129_passing-brightgreen.svg)](docs/TESTES.md)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 > **Plataforma corporativa B2B desenvolvida pela [Swali](https://www.swali.com.br/) para agências de eventos, produtoras e promotoras: monte escalas de equipe, colete folha de ponto digital em campo com selfie e geofencing GPS, faça o fechamento financeiro seguro e realize repasses via Pix no mesmo fluxo.**  
@@ -271,7 +271,7 @@ npm run dev
 A integridade do código é mantida através de comandos padronizados:
 
 ```bash
-# Executar todos os 128 testes automatizados (Vitest)
+# Executar todos os 129 testes automatizados (Vitest)
 npm run test
 
 # Verificação estática de tipos (TypeScript)

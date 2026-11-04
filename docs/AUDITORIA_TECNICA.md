@@ -3,7 +3,7 @@
 **Data da Auditoria:** 04 de Novembro de 2026  
 **Produto:** Já — Gestão de Equipes e Pagamentos  
 **Arquitetura:** TypeScript Full-Stack (TanStack Start, TanStack Router, Vite, React 19, Tailwind CSS 4, Supabase / PostgreSQL com RLS, Drizzle ORM, Asaas API Sandbox)  
-**Status dos Testes:** 25 suítes de testes, 128 testes automatizados passando (100% de sucesso).  
+**Status dos Testes:** 25 suítes de testes, 129 testes automatizados passando (100% de sucesso).  
 **Verificação Estática:** TypeScript (`tsc --noEmit`) 0 erros | ESLint 0 erros.
 
 ---
@@ -18,17 +18,17 @@
   - `src/routes/login.tsx`: Autenticação e entrada de operadores e freelancers.
   - `src/routes/ponto.$token.tsx`: Ponto eletrônico mobile público com antifraude (QR Code, geofencing Haversine e selfie para auditoria humana com expurgo LGPD).
   - `src/routes/_authenticated/`: Layout protegido por sessão Supabase (`app-shell.tsx`) com controle RBAC (`ADMIN_MASTER`, `ADMIN_EMPRESA`, `COORDENADOR`, `SUPORTE`).
-  - `src/routes/api/public/webhooks/asaas.ts`: Ingestão assíncrona de webhooks com verificação de token, trava atômica inicial de idempotência (`status: "processando"`) e ciclo de vida completo de transferências e cobranças.
+  - `src/routes/api/public/webhooks/asaas.ts`: Ingestão assíncrona de webhooks com verificação de token, trava atômica inicial de idempotência (`status: "processando"`), política de recuperação de falhas com controle de tentativas e estornos transacionais via RPC.
 - **`src/lib/`**: Funções de domínio, regras de negócio e Server Functions (`@tanstack/react-start`):
   - `auth.functions.ts` / `autorizacao.ts`: Resolução de sessões, perfis, capacidades e contexto de tenant (`empresa_atual`).
   - `cobranca.functions.ts` / `cobranca-v2.ts`: Planos de assinatura SaaS, limites de eventos, precificação imutável por ciclo e faturamento de participações.
   - `fechamento.functions.ts` / `fechamento.ts`: Cálculo de diárias, horas extras, adicionais e consolidação de lotes para pagamento.
-  - `pagamentos.server.ts`: Máquina de estados financeira estrita (`pendente`, `processando`, `aguardando_aprovacao`, `executado`, `falhou`, `estornado`), eliminando confirmações prematuras de Pix.
+  - `pagamentos.server.ts`: Bloqueio atômico pessimista contra concorrência (`iniciar_processamento_pagamento_pix`), separação estrita de estados (`pendente`, `processando`, `aguardando_aprovacao`, `executado`, `falhou`, `estornado`) e débito contábil garantido com índice único parcial.
   - `tesouraria.functions.ts` / `tesouraria.ts`: Segregação contábil rígida entre saldo bancário real, adiantamentos de clientes (funding em custódia) e receita de agência.
-  - `webhook-idempotencia.ts`: Geração determinística de chaves de idempotência e dedup de eventos de gateway.
-  - `ponto.functions.ts`: Máquina de estados ordenada do ponto resiliente a serverless com persistência direta no PostgreSQL e trilha em `auditoria_ponto_publico`.
+  - `webhook-idempotencia.ts`: Geração determinística de chaves de idempotência, recuperação de eventos falhos e dedup de eventos de gateway.
+  - `ponto.functions.ts`: Máquina de estados ordenada do ponto com persistência obrigatória no PostgreSQL e trilha compulsória em `auditoria_ponto_publico`.
 - **`supabase/` & `drizzle/`**:
-  - `supabase/migrations/`: Migrações SQL executadas no banco PostgreSQL gerenciado do Supabase, contendo definições de tabelas, triggers, funções de segurança e políticas RLS.
+  - `supabase/migrations/`: Migrações SQL executadas no banco PostgreSQL gerenciado do Supabase, contendo definições de tabelas, triggers, índices únicos parciais, funções de segurança e políticas RLS.
   - `drizzle/`: Definições DDL e schemas tipados (`drizzle/schema.ts`) utilizados para tipagem estrita de entidades no TypeScript e migrações locais estruturadas.
 
 ---
@@ -77,23 +77,28 @@
 - **Nenhum centavo real é transferido em ambiente de homologação ou teste.**
 - Variável `ASAAS_ENVIRONMENT=sandbox` é aplicada por padrão.
 
-### 4.2. Máquina de Estados e Confirmação de Transferências Pix
+### 4.2. Máquina de Estados, Bloqueio Atômico e Confirmação de Transferências Pix
 
+- **Bloqueio Atômico Pessimista contra Concorrência:** Antes de invocar a API externa do parceiro Asaas, o sistema executa a transição atômica `pendente` ➔ `processando` no PostgreSQL via RPC `iniciar_processamento_pagamento_pix` (com bloqueio de linha `FOR UPDATE`) ou via atualização condicional estrita. Se requisições simultâneas chegarem para o mesmo pagamento, apenas a primeira adquire o lock; as demais falham imediatamente sem disparar transferências duplicadas.
 - **Separação Rígida de Estados em `src/lib/pagamentos.server.ts`:**
   - `pendente`: Pagamento criado e aguardando processamento.
   - `processando`: Transferência despachada para o parceiro Asaas, aguardando liquidação bancária (`PENDING` ou `BANK_PROCESSING`). **Nunca** marcado como executado prematuramente.
   - `aguardando_aprovacao`: Requer aprovação ou autorização de ação crítica no Asaas (`AWAITING_CRITICAL_ACTION_AUTHORIZATION`).
-  - `executado`: Transferência terminalmente confirmada (`DONE` ou `CONFIRMED`) via webhook ou polling com data de execução registrada.
+  - `executado`: Transferência terminalmente confirmada (`DONE` ou `CONFIRMED`) via webhook ou conciliação com timestamp registrado.
   - `falhou`: Transferência rejeitada pelo banco recebedor ou dados inválidos (`TRANSFER_FAILED`, `TRANSFER_CANCELLED`).
   - `estornado`: Transferência revertida após execução (`TRANSFER_REVERSED`), com re-crédito compensatório no saldo da agência.
+- **Efetivação e Débito Transacional Garantido:** O débito contábil em `movimentos_saldo` é vinculado ao `pagamento_id` e protegido pelo índice único parcial no PostgreSQL (`idx_movimentos_pagamento_debito`), garantindo que nenhuma transferência seja criada sem o correspondente lançamento contábil nem duplicada por concorrência.
 
-### 4.3. Ingestão Atômica de Webhooks e Prevenção Concorrente de Duplo Débito/Crédito
+### 4.3. Ingestão Atômica de Webhooks, Retomada de Falhas e Estornos Transacionais
 
-- A rota `/api/public/webhooks/asaas` adquire o lock de idempotência **antes** de qualquer efeito colateral:
-  1. Insere imediatamente em `webhook_eventos` com status `processando` e chave única determinística (`asaas-webhook:{evento}:{paymentId}:{transferId}:{valor}`).
-  2. Caso ocorra concorrência e o PostgreSQL retorne `unique_violation` (`23505`), o handler encerra com `200 OK` instantaneamente, garantindo atomicidade sem janelas de race condition.
-  3. Processa a atualização financeira em transação controlada e finaliza o status do evento para `processado` ou `falhou`.
-  4. Trata o ciclo completo de transferências Asaas (`TRANSFER_DONE`, `TRANSFER_CONFIRMED`, `TRANSFER_FAILED`, `TRANSFER_CANCELLED`, `TRANSFER_REVERSED`), garantindo estorno automático do extrato sem duplicações.
+- **Aquisição e Política de Recuperação de Idempotência:**
+  1. A rota `/api/public/webhooks/asaas` insere imediatamente em `webhook_eventos` com status `processando` e chave determinística (`asaas-webhook:{evento}:{paymentId}:{transferId}:{valor}`).
+  2. Concorrência simultânea no mesmo milissegundo intercepta a constraint `23505` (`unique_violation`).
+  3. Se o evento já existir com status `processado`, responde `200 OK` imediatamente.
+  4. Se o evento estiver com status `falhou` ou `processando` expirado (> 5 minutos por crash de processo), o sistema adquire a retomada, incrementa o contador `tentativas` (com teto máximo de 5 tentativas) e reprocessa de forma segura.
+- **Estorno Transacional Atômico (`reverter_transferencia_pagamento_pix`):**
+  - Eventos de reversão (`TRANSFER_FAILED`, `TRANSFER_CANCELLED`, `TRANSFER_REVERSED`) executam a alteração de status do pagamento e a inserção do crédito de estorno dentro da mesma transação ACID no PostgreSQL.
+  - O crédito de estorno é protegido pelo índice único parcial `idx_movimentos_pagamento_credito`, impedindo duplo estorno sob múltiplas entregas do parceiro bancário.
 
 ---
 
@@ -101,15 +106,15 @@
 
 ### 5.1. Mecanismos de Proteção e Resiliência
 
-1. **QR Code Dinâmico e Assinado:** Expira automaticamente após o evento (tolerância máxima de 12 horas). Tokens criptograficamente assinados (`qr.<payload>.<hmac>`) permitem validação independente de sessões em memória.
+1. **Persistência Obrigatória sem Fallback Silencioso:** O fluxo de ponto eletrônico nunca retorna sucesso (`ok: true`) baseado apenas em estado volátil em memória (`sessao`) ou arquivo local `/tmp/ponto-store.json`. A gravação no PostgreSQL (`pontos` e `auditoria_ponto_publico`) é mandatória. Qualquer indisponibilidade no banco de dados falha de forma explícita (`fail-closed`), mantendo a integridade operacional e probatória.
 2. **Resiliência Serverless (Multi-instâncias / Vercel):**
    - O registro de ponto em `src/lib/ponto.functions.ts` possui resolução nativa diretamente no PostgreSQL quando executado em containers serverless frios ou instâncias paralelas.
-   - Não depende de sessões voláteis em memória RAM (`sessao`) para garantir a persistência das marcações.
-   - Valida a sequência cronológica real das marcações consultando o histórico no banco de dados.
-3. **Geolocalização Haversine:** A coordenada GPS informada pelo navegador móvel do colaborador é validada contra a latitude/longitude do evento com raio de tolerância configurável (300m a 1000m).
-4. **Máquina de Estados de Marcações:** A ordem cronológica `Entrada` ➔ `Início de Intervalo` ➔ `Fim de Intervalo` ➔ `Saída` é estritamente exigida. Batidas repetidas ou fora de ordem são rejeitadas.
-5. **Trilha de Auditoria Pública:** Toda tentativa de registro gera registro imutável em `auditoria_ponto_publico` com status, tipo e detalhes técnicos.
-6. **Selfie como Evidência de Auditoria Humana:**
+   - O endpoint `identificarNoPonto` consulta o histórico real de marcações no PostgreSQL, impedindo que colaboradores recebam visualizações desatualizadas devido a instâncias distintas da Vercel.
+3. **QR Code Dinâmico e Assinado:** Expira automaticamente após o evento (tolerância máxima de 12 horas). Tokens criptograficamente assinados (`qr.<payload>.<hmac>`) permitem validação independente de sessões em memória.
+4. **Geolocalização Haversine:** A coordenada GPS informada pelo navegador móvel do colaborador é validada contra a latitude/longitude do evento com raio de tolerância configurável (300m a 1000m).
+5. **Máquina de Estados de Marcações:** A ordem cronológica `Entrada` ➔ `Início de Intervalo` ➔ `Fim de Intervalo` ➔ `Saída` é estritamente exigida. Batidas repetidas ou fora de ordem são rejeitadas.
+6. **Trilha de Auditoria Pública:** Toda tentativa de registro gera registro imutável em `auditoria_ponto_publico` com status, tipo e detalhes técnicos.
+7. **Selfie como Evidência de Auditoria Humana:**
    - A selfie não é alegada como biometria facial algorítmica viva, mas como registro fotográfico de evidência para conferência pelo supervisor.
    - Consentimento explícito do trabalhador registrado no ato da foto.
    - Armazenamento em bucket seguro com chave de retenção configurável e rotina de expurgo automático de conformidade com a LGPD.

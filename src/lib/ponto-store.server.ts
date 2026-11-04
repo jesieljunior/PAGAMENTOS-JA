@@ -1,3 +1,17 @@
+/**
+ * CACHE EPÊMERO DE SESSÃO LOCAL — PONTO DIGITAL
+ *
+ * ATENÇÃO ARQUITETURAL:
+ * Este módulo provê apenas um cache em memória e arquivo /tmp para visualização
+ * rápida na mesma instância ativa do supervisor. Em ambientes serverless distribuídos
+ * (como Vercel ou Cloud Run multi-container), este armazenamento NÃO é durável
+ * nem compartilhado.
+ *
+ * A fonte oficial, auditada e autoritativa de marcações de ponto é EXCLUSIVAMENTE
+ * a tabela `public.pontos` e `public.auditoria_ponto_publico` no PostgreSQL (Supabase).
+ * Nenhuma marcação ou confirmação é considerada válida sem confirmação direta no banco.
+ */
+
 import fs from "node:fs";
 import path from "node:path";
 

@@ -508,13 +508,43 @@ export const identificarNoPonto = createServerFn({ method: "POST" })
           }
         }
 
-        // Fallback para cache de escalas da sessão
+        // Validação da escala a partir da sessão
         const escalaCache = sessao.escalas.find((e) => e.cpf.replace(/\D/g, "") === cpfLimpo);
         if (!escalaCache) {
           throw new Error("Colaborador com este CPF não encontrado na escala deste evento.");
         }
         if (escalaCache.status === "recusado") {
           throw new Error("Sua participação neste evento foi recusada.");
+        }
+
+        // Consulta sempre o PostgreSQL para evitar marcas desatualizadas entre instâncias serverless
+        try {
+          const { hasAdminKey, supabaseAdmin } =
+            await import("@/integrations/supabase/client.server");
+          const dbClient = sessao.authHeader
+            ? criarSupabaseClientComAuth(sessao.authHeader)
+            : hasAdminKey()
+              ? supabaseAdmin
+              : null;
+
+          if (dbClient) {
+            const { data: pontosDb } = await dbClient
+              .from("pontos")
+              .select("id, tipo, registrado_em, status, fora_horario")
+              .eq("escala_id", escalaCache.escalaId)
+              .order("registrado_em");
+
+            if (pontosDb) {
+              return {
+                escalaId: escalaCache.escalaId,
+                statusEscala: escalaCache.status,
+                nome: escalaCache.nome,
+                pontos: pontosDb,
+              };
+            }
+          }
+        } catch {
+          // Continua para o cache local se a rede falhar
         }
 
         const pontosCache = sessao.pontos.filter((p) => p.escalaId === escalaCache.escalaId);
@@ -631,49 +661,62 @@ export const confirmarPresenca = createServerFn({ method: "POST" })
         }
       }
 
-      try {
-        const { hasAdminKey, supabaseAdmin } =
-          await import("@/integrations/supabase/client.server");
-        const dbClient = sessao?.authHeader
-          ? criarSupabaseClientComAuth(sessao.authHeader)
-          : hasAdminKey()
-            ? supabaseAdmin
-            : null;
+      const { hasAdminKey, supabaseAdmin } = await import("@/integrations/supabase/client.server");
+      const dbClient = sessao?.authHeader
+        ? criarSupabaseClientComAuth(sessao.authHeader)
+        : hasAdminKey()
+          ? supabaseAdmin
+          : null;
 
-        if (dbClient) {
-          const { data: evento } = await dbClient
-            .from("eventos")
-            .select("id, empresa_id")
-            .eq("qr_code_token", data.token)
-            .maybeSingle();
+      if (!dbClient) {
+        throw new Error("Conexão com o banco de dados indisponível para confirmar presença.");
+      }
 
-          if (evento) {
-            const { data: freela } = await dbClient
-              .from("freelancers")
-              .select("id")
-              .eq("empresa_id", evento.empresa_id)
-              .eq("cpf", cpfLimpo)
-              .maybeSingle();
+      const { data: evento, error: erroEv } = await dbClient
+        .from("eventos")
+        .select("id, empresa_id")
+        .eq("qr_code_token", data.token)
+        .maybeSingle();
 
-            if (freela) {
-              const { data: equipes } = await dbClient
-                .from("equipes")
-                .select("id")
-                .eq("evento_id", evento.id);
-              const eqIds = (equipes ?? []).map((e) => e.id);
-              if (eqIds.length > 0) {
-                await dbClient
-                  .from("escalas")
-                  .update({ status: "confirmado", confirmado_em: agoraIso })
-                  .eq("freelancer_id", freela.id)
-                  .in("equipe_id", eqIds)
-                  .eq("status", "convidado");
-              }
-            }
-          }
+      if (erroEv || !evento) {
+        throw new Error("QR Code não encontrado para confirmação de presença.");
+      }
+
+      const { data: freela, error: erroFreela } = await dbClient
+        .from("freelancers")
+        .select("id")
+        .eq("empresa_id", evento.empresa_id)
+        .eq("cpf", cpfLimpo)
+        .maybeSingle();
+
+      if (erroFreela || !freela) {
+        throw new Error("Colaborador não encontrado nesta agência.");
+      }
+
+      const { data: equipes } = await dbClient
+        .from("equipes")
+        .select("id")
+        .eq("evento_id", evento.id);
+      const eqIds = (equipes ?? []).map((e) => e.id);
+      if (eqIds.length > 0) {
+        const { error: erroConfirmacao } = await dbClient
+          .from("escalas")
+          .update({ status: "confirmado", confirmado_em: agoraIso })
+          .eq("freelancer_id", freela.id)
+          .in("equipe_id", eqIds)
+          .eq("status", "convidado");
+
+        if (erroConfirmacao) {
+          console.error("[ponto] Erro ao confirmar presença no banco:", erroConfirmacao);
+          throw new Error("Falha ao persistir confirmação de presença no banco de dados.");
         }
-      } catch (err) {
-        console.warn("[ponto] Falha ao confirmar presença no banco:", err);
+      }
+
+      if (sessao) {
+        const escala = sessao.escalas.find((e) => e.cpf.replace(/\D/g, "") === cpfLimpo);
+        if (escala) {
+          atualizarStatusEscalaSessao(data.token, escala.escalaId, "confirmado");
+        }
       }
 
       return { ok: true as const };
@@ -925,14 +968,14 @@ export const registrarPonto = createServerFn({ method: "POST" })
           .select("id")
           .single();
 
-        if (erroGravacao) {
+        if (erroGravacao || !pontoGravado?.id) {
           console.error("[ponto] Erro ao gravar ponto no banco:", erroGravacao);
-          throw new Error("Não foi possível persistir a marcação de ponto. Tente novamente.");
+          throw new Error(
+            "Não foi possível persistir a marcação de ponto no banco de dados. Tente novamente.",
+          );
         }
 
-        if (pontoGravado?.id) {
-          novoId = pontoGravado.id;
-        }
+        novoId = pontoGravado.id;
 
         // 6. Auditoria de ponto público
         try {
@@ -951,9 +994,9 @@ export const registrarPonto = createServerFn({ method: "POST" })
         } catch (auditoriaErr) {
           console.warn("[ponto] Não foi possível gravar auditoria pública:", auditoriaErr);
         }
-      } else if (!sessao) {
+      } else {
         throw new Error(
-          "Não foi possível conectar com o banco de dados para registrar o ponto. Notifique o supervisor.",
+          "Falha de infraestrutura: conexão com o banco de dados indisponível para registro persistente de ponto.",
         );
       }
 
