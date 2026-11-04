@@ -34,6 +34,9 @@ jobs:
       - name: Análise Estática de Código (ESLint)
         run: npm run lint
 
+      - name: Compilar Aplicação para Produção (Gera routeTree.gen.ts e assets)
+        run: npm run build
+
       - name: Verificação de Tipos TypeScript
         run: npm run typecheck
 
@@ -42,6 +45,3 @@ jobs:
 
       - name: Executar Testes Automatizados (Vitest)
         run: npm run test
-
-      - name: Compilar Aplicação para Produção
-        run: npm run build
