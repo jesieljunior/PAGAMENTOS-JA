@@ -70,6 +70,40 @@ export const Route = createFileRoute("/_authenticated/operacao/$eventoId")({
 
 const TIPOS: TipoPonto[] = ["entrada", "inicio_intervalo", "fim_intervalo", "saida"];
 
+interface PontoOperacao {
+  id: string;
+  tipo: TipoPonto;
+  metodo: string;
+  registrado_em: string;
+  status: string;
+  foto_url: string | null;
+  gps_lat: number | null;
+  gps_lng: number | null;
+  fora_horario?: boolean | undefined;
+  motivo_recusa?: string | null | undefined;
+  selfie_expira_em?: string | null | undefined;
+}
+
+interface OcorrenciaOperacao {
+  id: string;
+  descricao: string;
+  criado_em?: string | undefined;
+}
+
+interface EscalaOperacao {
+  id: string;
+  status: string;
+  freelancers?: { nome: string; funcao?: string | null | undefined } | null | undefined;
+  pontos: PontoOperacao[];
+  ocorrencias: OcorrenciaOperacao[];
+}
+
+interface EquipeOperacao {
+  id: string;
+  nome: string;
+  escalas: EscalaOperacao[];
+}
+
 function OperacaoEvento() {
   const { eventoId } = Route.useParams();
   const queryClient = useQueryClient();
@@ -77,16 +111,16 @@ function OperacaoEvento() {
   const [evidenciaAberta, setEvidenciaAberta] = useState<{
     url: string | null;
     nome: string;
-    funcao?: string | null;
+    funcao?: string | null | undefined;
     registradoEm: string;
     pontoId: string;
     escalaId: string;
     status: string;
-    gpsLat?: number | null;
-    gpsLng?: number | null;
+    gpsLat?: number | null | undefined;
+    gpsLng?: number | null | undefined;
     tipo: TipoPonto;
     metodo: string;
-    foraHorario?: boolean;
+    foraHorario?: boolean | undefined;
   } | null>(null);
   const [manual, setManual] = useState<{ escalaId: string; nome: string } | null>(null);
   const [recusando, setRecusando] = useState<{ pontoId: string; escalaId: string } | null>(null);
@@ -111,13 +145,13 @@ function OperacaoEvento() {
     },
   });
 
-  const equipes = useQuery({
+  const equipes = useQuery<EquipeOperacao[]>({
     queryKey: ["operacao", eventoId],
-    queryFn: async () => {
+    queryFn: async (): Promise<EquipeOperacao[]> => {
       try {
         const dados = await carregarFn({ data: { eventoId } });
         if (dados && Array.isArray(dados)) {
-          return dados;
+          return dados as unknown as EquipeOperacao[];
         }
       } catch (err) {
         console.warn("[operacao] Falha ao carregar via server function, usando query direta:", err);
@@ -141,21 +175,44 @@ function OperacaoEvento() {
           .order("criado_em");
 
         if (fallbackError) throw fallbackError;
-        return (fallbackData ?? []).map((eq) => ({
-          ...eq,
+        return (
+          (fallbackData ?? []) as unknown as Array<{
+            id: string;
+            nome: string;
+            escalas: Array<{
+              id: string;
+              status: string;
+              freelancers?: { nome: string; funcao?: string | null } | null;
+              pontos?: Record<string, unknown>[];
+              ocorrencias?: OcorrenciaOperacao[];
+            }>;
+          }>
+        ).map((eq) => ({
+          id: eq.id,
+          nome: eq.nome,
           escalas: (eq.escalas ?? []).map((es) => ({
-            ...es,
-            pontos: (es.pontos ?? []).map((p: Record<string, unknown>) => ({
-              ...p,
-              fora_horario: p["fora_horario"] ?? false,
-              motivo_recusa: p["motivo_recusa"] ?? null,
-              selfie_expira_em: p["selfie_expira_em"] ?? null,
+            id: es.id,
+            status: es.status,
+            freelancers: es.freelancers,
+            ocorrencias: es.ocorrencias ?? [],
+            pontos: (es.pontos ?? []).map((p) => ({
+              id: String(p["id"] ?? ""),
+              tipo: (p["tipo"] as TipoPonto) ?? "entrada",
+              metodo: String(p["metodo"] ?? "manual"),
+              registrado_em: String(p["registrado_em"] ?? ""),
+              status: String(p["status"] ?? "pendente"),
+              foto_url: (p["foto_url"] as string | null) ?? null,
+              gps_lat: (p["gps_lat"] as number | null) ?? null,
+              gps_lng: (p["gps_lng"] as number | null) ?? null,
+              fora_horario: Boolean(p["fora_horario"]),
+              motivo_recusa: (p["motivo_recusa"] as string | null) ?? null,
+              selfie_expira_em: (p["selfie_expira_em"] as string | null) ?? null,
             })),
           })),
-        })) as unknown as typeof data;
+        }));
       }
 
-      return data;
+      return (data ?? []) as unknown as EquipeOperacao[];
     },
     refetchInterval: 5000,
   });
@@ -189,26 +246,27 @@ function OperacaoEvento() {
 
   // Calculate operational metrics across teams
   const todasEscalas = (equipes.data ?? []).flatMap((q) =>
-    q.escalas.filter((es) => es.status !== "substituido" && es.status !== "recusado"),
+    (q.escalas ?? []).filter((es) => es.status !== "substituido" && es.status !== "recusado"),
   );
   const totalEscalados = todasEscalas.length;
   const totalConcluidos = todasEscalas.filter((es) =>
-    es.pontos.some((p) => p.tipo === "saida" && p.status !== "recusado"),
+    (es.pontos ?? []).some((p) => p.tipo === "saida" && p.status !== "recusado"),
   ).length;
   const totalPresentes = todasEscalas.filter(
     (es) =>
-      es.pontos.some((p) => p.tipo === "entrada" && p.status !== "recusado") &&
-      !es.pontos.some((p) => p.tipo === "saida" && p.status !== "recusado"),
+      (es.pontos ?? []).some((p) => p.tipo === "entrada" && p.status !== "recusado") &&
+      !(es.pontos ?? []).some((p) => p.tipo === "saida" && p.status !== "recusado"),
   ).length;
-  const totalComPonto = todasEscalas.filter((es) => es.pontos.length > 0).length;
+  const totalComPonto = todasEscalas.filter((es) => (es.pontos ?? []).length > 0).length;
   const todosPontosPendentes = todasEscalas.flatMap((es) =>
-    es.pontos
+    (es.pontos ?? [])
       .filter((p) => p.status === "pendente")
       .map((p) => ({ pontoId: p.id, escalaId: es.id })),
   );
   const totalPendentes = todosPontosPendentes.length;
   const totalOcorrencias = (equipes.data ?? []).reduce(
-    (acc, q) => acc + q.escalas.reduce((accE, es) => accE + es.ocorrencias.length, 0),
+    (acc, q) =>
+      acc + (q.escalas ?? []).reduce((accE, es) => accE + (es.ocorrencias ?? []).length, 0),
     0,
   );
 
@@ -233,20 +291,10 @@ function OperacaoEvento() {
   });
 
   async function abrirEvidencia(
-    p: {
-      id: string;
-      tipo: TipoPonto;
-      metodo: string;
-      registrado_em: string;
-      status: string;
-      foto_url: string | null;
-      gps_lat: number | null;
-      gps_lng: number | null;
-      fora_horario?: boolean;
-    },
+    p: PontoOperacao,
     nome: string,
-    funcao?: string | null,
-    escalaId?: string,
+    funcao?: string | null | undefined,
+    escalaId?: string | undefined,
   ) {
     let fotoUrl = p.foto_url;
     if (fotoUrl) {
@@ -461,16 +509,18 @@ function OperacaoEvento() {
       ) : (
         <div className="space-y-4">
           {(equipes.data ?? []).map((q) => {
-            const escalasFiltradas = q.escalas
+            const escalasFiltradas = (q.escalas ?? [])
               .filter((es) => es.status !== "substituido" && es.status !== "recusado")
               .filter((es) => {
-                const pontosValidos = es.pontos.filter((p) => p.status !== "recusado");
+                const pontosValidos = (es.pontos ?? []).filter((p) => p.status !== "recusado");
                 const temSaida = pontosValidos.some((p) => p.tipo === "saida");
                 const temEntrada = pontosValidos.some((p) => p.tipo === "entrada");
-                if (filtro === "pendentes") return es.pontos.some((p) => p.status === "pendente");
+                if (filtro === "pendentes") {
+                  return (es.pontos ?? []).some((p) => p.status === "pendente");
+                }
                 if (filtro === "presentes") return temEntrada && !temSaida;
                 if (filtro === "concluidos") return temSaida;
-                if (filtro === "sem_ponto") return es.pontos.length === 0;
+                if (filtro === "sem_ponto") return (es.pontos ?? []).length === 0;
                 return true;
               });
 
@@ -486,7 +536,9 @@ function OperacaoEvento() {
                     </li>
                   ) : (
                     escalasFiltradas.map((es) => {
-                      const pontosValidos = es.pontos.filter((p) => p.status !== "recusado");
+                      const pontosValidos = (es.pontos ?? []).filter(
+                        (p) => p.status !== "recusado",
+                      );
                       const temSaida = pontosValidos.some((p) => p.tipo === "saida");
                       const temEntrada = pontosValidos.some((p) => p.tipo === "entrada");
                       const temInicioIntervalo = pontosValidos.some(

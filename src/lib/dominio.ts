@@ -76,14 +76,14 @@ export const ROTULO_PAPEL: Record<PapelUsuario, string> = {
   supervisor: "Supervisor",
 };
 
-export const ROTULO_TIPO_PONTO: Record<TipoPonto, string> = {
+export const ROTULO_TIPO_PONTO: Record<string, string> = {
   entrada: "Entrada",
   saida: "Saída",
   inicio_intervalo: "Início do intervalo",
   fim_intervalo: "Fim do intervalo",
 };
 
-export const ROTULO_METODO: Record<MetodoCheck, string> = {
+export const ROTULO_METODO: Record<string, string> = {
   qrcode: "QR Code",
   selfie: "Selfie",
   manual: "Manual",

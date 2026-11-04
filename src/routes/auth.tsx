@@ -132,9 +132,9 @@ function Auth() {
       }
 
       const meta = (user.user_metadata || {}) as Record<string, string>;
-      const ag = nomeAgencia.trim() || meta.nomeAgencia;
-      const doc = cnpj.replace(/\D+/g, "") || meta.cnpj;
-      const pl = planoCodigo || meta.planoCodigo || "free";
+      const ag = nomeAgencia.trim() || meta["nomeAgencia"];
+      const doc = cnpj.replace(/\D+/g, "") || meta["cnpj"];
+      const pl = planoCodigo || meta["planoCodigo"] || "free";
 
       if (ag && doc) {
         try {
@@ -264,13 +264,12 @@ function Auth() {
     }
     setCarregando(true);
     try {
+      const redirectUrl =
+        typeof window !== "undefined" ? `${window.location.origin}/auth` : undefined;
       const { error } = await supabase.auth.resend({
         type: "signup",
         email: emailLimpo,
-        options: {
-          emailRedirectTo:
-            typeof window !== "undefined" ? `${window.location.origin}/auth` : undefined,
-        },
+        ...(redirectUrl ? { options: { emailRedirectTo: redirectUrl } } : {}),
       });
       setCarregando(false);
       if (error) {
@@ -463,7 +462,7 @@ function Auth() {
           email: emailLimpo,
           password: senha,
           options: {
-            emailRedirectTo: redirectUrl,
+            ...(redirectUrl ? { emailRedirectTo: redirectUrl } : {}),
             data: {
               nome: nome.trim(),
               nomeAgencia: nomeAgencia.trim(),

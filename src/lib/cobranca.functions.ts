@@ -517,7 +517,7 @@ export const selecionarPlanoEmpresa = createServerFn({ method: "POST" })
     }
 
     // Gera fatura e cobrança imediata caso o plano contratado tenha mensalidade
-    let faturaId = crypto.randomUUID();
+    let faturaId: string = crypto.randomUUID();
     let cobrancaInfo = null;
 
     if (plano.mensalidade > 0) {
@@ -584,14 +584,13 @@ export const selecionarPlanoEmpresa = createServerFn({ method: "POST" })
         id: string;
         nome: string;
         cnpj: string | null;
-        email: string | null;
-        telefone: string | null;
+        email_cobranca: string | null;
         razao_social: string | null;
       } | null = null;
       try {
         const { data: emp } = await client
           .from("empresas")
-          .select("id, nome, cnpj, email, telefone, razao_social")
+          .select("id, nome, cnpj, email_cobranca, razao_social")
           .eq("id", empresaId)
           .maybeSingle();
         empData = emp;
@@ -609,9 +608,9 @@ export const selecionarPlanoEmpresa = createServerFn({ method: "POST" })
         const docLimpo = (empData?.cnpj || "").replace(/\D/g, "");
         const clienteAsaasId = await garantirClienteAsaas({
           nome: empData?.razao_social || empData?.nome || "Agência Já",
-          cpfCnpj: docLimpo || undefined,
-          email: empData?.email || null,
-          telefone: empData?.telefone || null,
+          cpfCnpj: docLimpo ? docLimpo : null,
+          email: empData?.email_cobranca || null,
+          telefone: null,
           referenciaExterna: empresaId,
         });
 

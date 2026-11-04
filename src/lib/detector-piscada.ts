@@ -47,13 +47,13 @@ export interface MetricasLiveness {
   bilateralEar: number;
   earAbertoBaseline: number;
   /** Sinal usado pela máquina: 0 = olhos abertos, 1 = fechados. */
-  fechamento?: number;
+  fechamento?: number | undefined;
   contagemPiscadas: number;
-  duracaoPiscada1Ms?: number;
-  duracaoPiscada2Ms?: number;
+  duracaoPiscada1Ms?: number | undefined;
+  duracaoPiscada2Ms?: number | undefined;
   faceEstavel: boolean;
   /** Use para dicas na UI ("Aproxime o rosto", "Olhe de frente"...). */
-  motivoRosto?: MotivoRosto;
+  motivoRosto?: MotivoRosto | undefined;
   sessaoId: string;
 }
 

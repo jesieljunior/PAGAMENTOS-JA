@@ -1,5 +1,6 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
+import type { Json } from "@/integrations/supabase/types";
 
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { requireCapability } from "@/lib/autorizacao.server";
@@ -51,7 +52,7 @@ async function registrarAuditoria(
     recurso_tipo: string;
     recurso_id: string;
     resultado: "sucesso" | "erro";
-    detalhes: Record<string, unknown>;
+    detalhes?: Json;
   },
 ) {
   try {

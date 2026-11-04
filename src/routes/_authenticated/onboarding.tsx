@@ -97,7 +97,7 @@ function Onboarding() {
     }
   }
 
-  const planoAtivo = PLANOS_CATALOGO.find((p) => p.codigo === planoCodigo) || PLANOS_CATALOGO[0];
+  const planoAtivo = PLANOS_CATALOGO.find((p) => p.codigo === planoCodigo) || PLANOS_CATALOGO[0]!;
 
   return (
     <div className="flex min-h-[100dvh] flex-col items-center justify-between bg-slate-50 dark:bg-slate-950 px-4 py-8 sm:px-6 sm:py-12">

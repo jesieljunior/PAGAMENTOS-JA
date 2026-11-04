@@ -3,7 +3,7 @@ export interface CookieConsentPreferences {
   analitico: boolean;
   marketing: boolean;
   respondido: boolean;
-  timestamp?: string;
+  timestamp?: string | undefined;
   versao: string;
 }
 
