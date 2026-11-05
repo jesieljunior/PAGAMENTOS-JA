@@ -182,7 +182,7 @@ export const Route = createFileRoute("/api/public/webhooks/asaas")({
                   {
                     _fatura_id: faturaPlataforma.id,
                     _parceiro_id: parceiroId,
-                    _valor: corpo.payment?.value ?? faturaPlataforma.total,
+                    _valor: corpo.payment?.value ?? null,
                   },
                 );
                 if (!errRpc && resRpc && (resRpc as { ok?: boolean }).ok) {
@@ -193,25 +193,9 @@ export const Route = createFileRoute("/api/public/webhooks/asaas")({
               }
 
               if (!liquidadaRpc) {
-                const agora = new Date().toISOString();
-                // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                await (supabaseAdmin.from("faturas_plataforma") as any)
-                  .update({
-                    status: "pago",
-                    referencia_provedor: parceiroId,
-                    provedor: "asaas",
-                    pago_em: agora,
-                    atualizado_em: agora,
-                  })
-                  .eq("id", faturaPlataforma.id);
-
-                await supabaseAdmin
-                  .from("assinaturas")
-                  .update({
-                    status: "ativa",
-                    atualizado_em: agora,
-                  })
-                  .eq("empresa_id", faturaPlataforma.empresa_id);
+                throw new Error(
+                  "Falha na liquidação atômica da fatura SaaS; o evento será reprocessado.",
+                );
               }
             }
           }
