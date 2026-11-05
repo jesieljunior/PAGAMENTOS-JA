@@ -455,7 +455,7 @@ export const selecionarPlanoEmpresa = createServerFn({ method: "POST" })
         trial_ate: trialAte,
       };
 
-      let novaAssinatura: { id: string; plano_id: string; status: string } | null = null;
+      let novaAssinatura: { id: string; plano_id: string | null; status: string } | null = null;
       let erroCriacaoAssinatura: string | null = null;
 
       const resultadoCliente = await client
