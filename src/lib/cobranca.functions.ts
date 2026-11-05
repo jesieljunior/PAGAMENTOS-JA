@@ -431,21 +431,41 @@ export const selecionarPlanoEmpresa = createServerFn({ method: "POST" })
     };
 
     if (assinaturaExistente) {
-      const { error: erroUpdate } = await client
+      let assinaturaAtualizada = false;
+      let erroAtualizacaoAssinatura: string | null = null;
+
+      const resultadoUpdateCliente = await client
         .from("assinaturas")
         .update(patchAssinatura)
-        .eq("id", assinaturaExistente.id);
+        .eq("id", assinaturaExistente.id)
+        .select("id")
+        .maybeSingle();
 
-      if (erroUpdate && admin) {
-        try {
-          const { error: erroAdmin } = await admin
-            .from("assinaturas")
-            .update(patchAssinatura)
-            .eq("id", assinaturaExistente.id);
-          if (erroAdmin) throw new Error(erroAdmin.message);
-        } catch {
-          // prossegue
+      if (resultadoUpdateCliente.error) {
+        erroAtualizacaoAssinatura = resultadoUpdateCliente.error.message;
+      } else if (resultadoUpdateCliente.data?.id) {
+        assinaturaAtualizada = true;
+      }
+
+      if (!assinaturaAtualizada && admin) {
+        const resultadoUpdateAdmin = await admin
+          .from("assinaturas")
+          .update(patchAssinatura)
+          .eq("id", assinaturaExistente.id)
+          .select("id")
+          .maybeSingle();
+
+        if (resultadoUpdateAdmin.error) {
+          erroAtualizacaoAssinatura = resultadoUpdateAdmin.error.message;
+        } else if (resultadoUpdateAdmin.data?.id) {
+          assinaturaAtualizada = true;
         }
+      }
+
+      if (!assinaturaAtualizada) {
+        throw new Error(
+          `Não foi possível atualizar a assinatura existente: ${erroAtualizacaoAssinatura ?? "Nenhuma assinatura foi atualizada."}`,
+        );
       }
     } else {
       const novaAssinaturaPayload = {
