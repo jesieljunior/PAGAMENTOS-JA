@@ -759,6 +759,9 @@ export const confirmarPagamentoFaturaPlano = createServerFn({ method: "POST" })
     }
 
     // 2. Liquidação atômica da fatura e ativação da assinatura
+    if (!parceiroPagamentoId) {
+      throw new Error("Asaas não retornou o identificador da cobrança confirmada.");
+    }
     const agoraIso = new Date().toISOString();
     let liquidadoViaRpc = false;
 
@@ -768,7 +771,7 @@ export const confirmarPagamentoFaturaPlano = createServerFn({ method: "POST" })
         "liquidar_fatura_plataforma_asaas",
         {
           _fatura_id: data.faturaId,
-          _parceiro_id: parceiroPagamentoId || `manual_${data.metodo}`,
+          _parceiro_id: parceiroPagamentoId,
           _valor: valorConfirmadoGateway,
         },
       );
