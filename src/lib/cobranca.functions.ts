@@ -594,7 +594,8 @@ export const selecionarPlanoEmpresa = createServerFn({ method: "POST" })
       }
 
       if (!faturaPersistida) {
-        const detalhe = resultadoFaturaCliente.error?.message ?? "O banco não retornou o ID da fatura.";
+        const detalhe =
+          resultadoFaturaCliente.error?.message ?? "O banco não retornou o ID da fatura.";
         throw new Error(detalhe);
       }
 
