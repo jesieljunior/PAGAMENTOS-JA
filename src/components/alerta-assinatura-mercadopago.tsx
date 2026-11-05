@@ -67,7 +67,7 @@ export function AlertaAssinaturaMercadoPago() {
           </AlertTitle>
           <AlertDescription className="text-xs sm:text-sm mt-1 text-amber-800 dark:text-amber-400">
             {assinatura.motivo ??
-              "O pagamento da sua mensalidade via Mercado Pago está pendente de confirmação. Assim que for compensado, o acesso completo será mantido."}
+              "O pagamento da sua mensalidade via Asaas está pendente de compensação. Assim que for confirmado pelo banco ou gateway, o acesso completo será mantido."}
           </AlertDescription>
         </div>
         <Button

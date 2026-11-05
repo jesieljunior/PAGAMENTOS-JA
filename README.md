@@ -24,7 +24,7 @@ Agências de casting, produtoras de eventos e empresas de terceirização enfren
 
 A plataforma **Já** atua em um fluxo operacional unificado:
 
-- **Ponto Digital em Campo:** check-in/out via celular do colaborador com leitura de QR Code dinâmico (expiração em 12h), geofencing por GPS (cálculo Haversine) e registro de selfie para conferência humana pelo supervisor.
+- **Ponto Digital em Campo:** check-in/out via celular do colaborador com leitura de QR Code dinâmico assinado criptograficamente (HMAC com segredo de servidor e expiração estrita), geofencing por GPS (cálculo Haversine) e registro de selfie para conferência humana pelo supervisor.
 - **Fechamento Operacional:** apuração de horas trabalhadas, horas extras e valor líquido com conferência em tela única e aprovação pelo coordenador.
 - **Tesouraria com Segregação de Saldos:** separação contábil clara e isolada entre saldo real bancário, saldo aportado por clientes em custódia (_funding_) e receita de agência.
 - **Repasses Pix e Webhooks:** integração com gateway bancário (Asaas API v3) com idempotência transacional contra duplicidade de créditos e monitoramento de expiração de credenciais.
@@ -41,7 +41,7 @@ A plataforma **Já** atua em um fluxo operacional unificado:
 | **Schema as Code**        | [Drizzle ORM](https://orm.drizzle.team/)                                           | Definição declarativa de schemas (`drizzle/schema.ts`), migrações e tipagem de domínio.    |
 | **Estilização & UI**      | [Tailwind CSS 4](https://tailwindcss.com/) + [Radix UI](https://www.radix-ui.com/) | Design system corporativo desenvolvido para alta densidade de informação operacional.      |
 | **Gateway de Pagamento**  | [Asaas API v3](https://docs.asaas.com/)                                            | Cobranças e repasses Pix com suporte automático para ambientes de Sandbox e Produção.      |
-| **Testes Automatizados**  | [Vitest](https://vitest.dev/)                                                      | 25 suítes e 128 testes cobrindo multi-tenancy, idempotência, tesouraria e regras de ponto. |
+| **Testes Automatizados**  | [Vitest](https://vitest.dev/)                                                      | 25 suítes e 129 testes cobrindo multi-tenancy, idempotência, tesouraria e regras de ponto. |
 | **Hospedagem & Deploy**   | [Vercel](https://vercel.com/) / Docker                                             | Deploy nativo com suporte a SSR e rotas de API com pré-configuração em `vercel.json`.      |
 
 ---
@@ -53,7 +53,7 @@ A plataforma **Já** atua em um fluxo operacional unificado:
 | **Landing Page Swali com Mockups**       | ✅ Implementado | Página inicial moderna para agências de eventos, com mockups ilustrativos e identidade Swali.   |
 | **Monitoramento da API Asaas**           | ✅ Implementado | Alerta no painel Master com contagem regressiva para renovação da chave de integração.          |
 | **Isolamento Multi-Tenant Estrito**      | ✅ Implementado | RLS em todas as tabelas de negócio; comprovado por testes automatizados de cross-tenant.        |
-| **Ponto Mobile Antifraude**              | ✅ Implementado | QR Code com expiração de 12h, tolerância GPS Haversine e selfie para auditoria do supervisor.   |
+| **Ponto Mobile Antifraude**              | ✅ Implementado | QR Code assinado (sem segredo estático e expiração estrita), GPS Haversine e selfie de auditoria.|
 | **Máquina de Estados de Marcações**      | ✅ Implementado | Sequência estrita `Entrada ➔ Início Intervalo ➔ Fim Intervalo ➔ Saída`; rejeição de duplicatas. |
 | **Segregação de Saldos em Tesouraria**   | ✅ Implementado | Separação contábil entre adiantamento de clientes (_funding_ em custódia) e receita própria.    |
 | **Faturamento SaaS V2**                  | ✅ Implementado | Planos por participações deduplicadas com precificação imutável congelada por ciclo.            |
@@ -61,7 +61,7 @@ A plataforma **Já** atua em um fluxo operacional unificado:
 | **Perfis e Acesso Suporte Auditado**     | ✅ Implementado | RBAC (`admin`, `coordenador`, `suporte`, `master`); suporte falha fechado sem ticket ativo.     |
 | **Repasses Pix Integrados**              | ✅ Implementado | Disparo de Pix em lote e conferência financeira com liquidação na chave Pix do profissional.    |
 | **Validação Cadastral Frela vs CLT**     | ✅ Implementado | Validações fiscais de CPF, PIS, chave Pix e separação de rotinas de cálculo.                    |
-| **Suíte de Testes Automatizados**        | ✅ Implementado | 25 arquivos de teste e 128 testes automatizados com 100% de aprovação no Vitest.                |
+| **Suíte de Testes Automatizados**        | ✅ Implementado | 25 arquivos de teste e 129 testes automatizados com 100% de aprovação no Vitest.                |
 | **Pipeline de Integração Contínua (CI)** | ✅ Implementado | GitHub Actions com lint, build de rotas, typecheck, varredura de segredos e testes.             |
 | **Deploy Nativo na Vercel**              | ✅ Implementado | Arquivo `vercel.json` configurado com rewrites adequados para TanStack Start / Nitro.           |
 

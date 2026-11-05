@@ -425,7 +425,7 @@ export const selecionarPlanoEmpresa = createServerFn({ method: "POST" })
 
     const patchAssinatura = {
       plano_id: plano.id,
-      status: ehGratuito ? "trial" : "ativa",
+      status: ehGratuito ? "trial" : "pendente",
       trial_ate: trialAte,
       atualizado_em: new Date().toISOString(),
     };
@@ -451,7 +451,7 @@ export const selecionarPlanoEmpresa = createServerFn({ method: "POST" })
       const { error: erroInsert } = await client.from("assinaturas").insert({
         empresa_id: empresaId,
         plano_id: plano.id,
-        status: ehGratuito ? "trial" : "ativa",
+        status: ehGratuito ? "trial" : "pendente",
         trial_ate: trialAte,
       });
 
@@ -460,7 +460,7 @@ export const selecionarPlanoEmpresa = createServerFn({ method: "POST" })
           const { error: erroAdmin } = await admin.from("assinaturas").insert({
             empresa_id: empresaId,
             plano_id: plano.id,
-            status: ehGratuito ? "trial" : "ativa",
+            status: ehGratuito ? "trial" : "pendente",
             trial_ate: trialAte,
           });
           if (erroAdmin) throw new Error(erroAdmin.message);
@@ -642,33 +642,17 @@ export const selecionarPlanoEmpresa = createServerFn({ method: "POST" })
         );
       }
 
-      // Gera código Pix Copia e Cola padrão Banco Central do Brasil como fallback
-      const pixChave = "financeiro@swali.com.br";
-      const nomeBeneficiario = "JA PLATAFORMA";
-      const cidade = "SAO PAULO";
-      const valorStr = plano.mensalidade.toFixed(2);
-      const txid = faturaId.replace(/-/g, "").slice(0, 25);
-
-      const f = (id: string, val: string) => `${id}${String(val.length).padStart(2, "0")}${val}`;
-      const merchantAccount = `${f("00", "br.gov.bcb.pix")}${f("01", pixChave)}`;
-      const additionalData = `${f("05", txid)}`;
-      const payloadBase = `${f("00", "01")}${f("26", merchantAccount)}${f("52", "0000")}${f("53", "986")}${f("54", valorStr)}${f("58", "BR")}${f("59", nomeBeneficiario)}${f("60", cidade)}${f("62", additionalData)}6304`;
-
-      let crc = 0xffff;
-      for (let i = 0; i < payloadBase.length; i++) {
-        crc ^= payloadBase.charCodeAt(i) << 8;
-        for (let j = 0; j < 8; j++) {
-          if ((crc & 0x8000) !== 0) crc = (crc << 1) ^ 0x1021;
-          else crc <<= 1;
-        }
+      // Exige dados válidos emitidos dinamicamente pela infraestrutura oficial do Asaas
+      if (!pixCopiaColaReal && !checkoutUrlReal) {
+        throw new Error(
+          "Não foi possível obter a cobrança oficial no Asaas. Verifique a integração financeira.",
+        );
       }
-      const crcHex = (crc & 0xffff).toString(16).toUpperCase().padStart(4, "0");
-      const pixCopiaColaFallback = `${payloadBase}${crcHex}`;
 
       cobrancaInfo = {
         faturaId,
         valor: plano.mensalidade,
-        pixCopiaCola: pixCopiaColaReal || pixCopiaColaFallback,
+        pixCopiaCola: pixCopiaColaReal || "",
         checkoutUrl: checkoutUrlReal || `/plano?fatura=${faturaId}`,
         vencimento: vencimentoIso,
       };
@@ -683,7 +667,8 @@ export const selecionarPlanoEmpresa = createServerFn({ method: "POST" })
   });
 
 /**
- * Permite liquidar e registrar a quitação imediata de uma fatura de plano via Pix ou Cartão.
+ * Permite liquidar uma fatura de plano APÓS confirmação verificada no gateway Asaas
+ * ou por conciliação manual por administrador da plataforma.
  */
 export const confirmarPagamentoFaturaPlano = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
@@ -702,55 +687,142 @@ export const confirmarPagamentoFaturaPlano = createServerFn({ method: "POST" })
 
     const client = context.supabase;
     const admin = await getAdminClientSafe();
-    const agoraIso = new Date().toISOString();
+    const dbClient = admin || client;
 
-    const { error: erroFatura } = await client
+    // 1. Busca a fatura
+    const { data: fatura, error: errFatura } = await dbClient
       .from("faturas_plataforma")
-      .update({
-        status: "pago",
-        pago_em: agoraIso,
-        atualizado_em: agoraIso,
-      })
+      .select("*")
       .eq("id", data.faturaId)
-      .eq("empresa_id", empresaId);
+      .eq("empresa_id", empresaId)
+      .maybeSingle();
 
-    if (erroFatura && admin) {
+    if (errFatura || !fatura) {
+      throw new Error("Fatura não encontrada para esta organização.");
+    }
+
+    if (fatura.status === "pago" || fatura.status === "paga") {
+      return { ok: true, jaPaga: true, status: "pago" };
+    }
+
+    const ehPlataforma = Boolean(
+      context.contexto?.platformContext ||
+      context.contexto?.papeisPlataforma?.includes("admin_master"),
+    );
+
+    let confirmadoGateway = false;
+    let parceiroPagamentoId: string | null = fatura.referencia_provedor || null;
+
+    if (ehPlataforma) {
+      // Administrador da plataforma realizando conciliação manual autorizada
+      confirmadoGateway = true;
+    } else {
+      // Validação real e obrigatória com a API oficial do Asaas
       try {
-        await admin
-          .from("faturas_plataforma")
-          .update({
-            status: "pago",
-            pago_em: agoraIso,
-            atualizado_em: agoraIso,
-          })
-          .eq("id", data.faturaId)
-          .eq("empresa_id", empresaId);
-      } catch {
-        // prossegue
+        const { buscarCobrancaPorReferencia, obterCobrancaAsaas } = await import("./asaas.server");
+        const statusPagosAsaas = new Set(["RECEIVED", "CONFIRMED", "RECEIVED_IN_CASH"]);
+
+        // Tenta buscar pelo referencia_provedor caso já registrado
+        if (fatura.referencia_provedor) {
+          try {
+            const cobranca = await obterCobrancaAsaas(fatura.referencia_provedor);
+            if (cobranca && statusPagosAsaas.has(cobranca.status)) {
+              confirmadoGateway = true;
+              parceiroPagamentoId = cobranca.id;
+            }
+          } catch {
+            // Continua para busca por externalReference
+          }
+        }
+
+        // Se ainda não confirmado, busca por externalReference (faturaId)
+        if (!confirmadoGateway) {
+          const resultado = await buscarCobrancaPorReferencia(data.faturaId);
+          const cobranca = resultado.data?.[0];
+          if (cobranca && statusPagosAsaas.has(cobranca.status)) {
+            confirmadoGateway = true;
+            parceiroPagamentoId = cobranca.id;
+          }
+        }
+      } catch (errGateway) {
+        console.error(
+          "[confirmarPagamentoFaturaPlano] Erro ao consultar gateway Asaas:",
+          errGateway,
+        );
+        throw new Error(
+          "Não foi possível validar o pagamento com o Asaas no momento. Tente novamente em instantes.",
+        );
+      }
+
+      if (!confirmadoGateway) {
+        throw new Error(
+          "Pagamento ainda não confirmado pelo Asaas. Se você já realizou o pagamento via Pix ou Cartão, aguarde alguns instantes pela compensação bancária e tente novamente.",
+        );
       }
     }
 
-    // Atualiza status da assinatura da agência para ativa
-    await client
-      .from("assinaturas")
-      .update({ status: "ativa", atualizado_em: agoraIso })
-      .eq("empresa_id", empresaId);
+    // 2. Liquidação atômica da fatura e ativação da assinatura
+    const agoraIso = new Date().toISOString();
+    let liquidadoViaRpc = false;
 
-    // Auditoria
     try {
-      await client.from("logs_auditoria").insert({
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const { data: resRpc, error: errRpc } = await (dbClient.rpc as any)(
+        "liquidar_fatura_plataforma_asaas",
+        {
+          _fatura_id: data.faturaId,
+          _parceiro_id: parceiroPagamentoId || `manual_${data.metodo}`,
+          _valor: fatura.total,
+        },
+      );
+      if (!errRpc && resRpc?.ok) {
+        liquidadoViaRpc = true;
+      }
+    } catch {
+      liquidadoViaRpc = false;
+    }
+
+    if (!liquidadoViaRpc) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      await (dbClient.from("faturas_plataforma") as any)
+        .update({
+          status: "pago",
+          referencia_provedor: parceiroPagamentoId || fatura.referencia_provedor,
+          provedor: "asaas",
+          pago_em: agoraIso,
+          atualizado_em: agoraIso,
+        })
+        .eq("id", data.faturaId)
+        .eq("empresa_id", empresaId);
+
+      await dbClient
+        .from("assinaturas")
+        .update({ status: "ativa", atualizado_em: agoraIso })
+        .eq("empresa_id", empresaId);
+    }
+
+    // 3. Auditoria
+    try {
+      await dbClient.from("logs_auditoria").insert({
         empresa_id: empresaId,
         ator_id: context.userId,
-        ator_contexto: "organizacao",
-        acao: data.metodo === "pix" ? "fatura_plano_paga_pix" : "fatura_plano_paga_cartao",
+        ator_contexto: ehPlataforma ? "plataforma" : "organizacao",
+        acao: ehPlataforma
+          ? "fatura_plano_conciliada_manual"
+          : `fatura_plano_confirmada_${data.metodo}`,
         recurso_tipo: "fatura_plataforma",
         recurso_id: data.faturaId,
         resultado: "sucesso",
-        detalhes: { metodo: data.metodo, quitado_em: agoraIso },
+        detalhes: {
+          metodo: data.metodo,
+          quitado_em: agoraIso,
+          parceiro_id: parceiroPagamentoId,
+          confirmadoGateway,
+        },
       });
     } catch {
       // não-bloqueante
     }
 
-    return { ok: true };
+    return { ok: true, status: "pago" };
   });

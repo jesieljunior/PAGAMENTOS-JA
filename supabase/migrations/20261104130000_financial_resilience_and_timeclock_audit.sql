@@ -35,8 +35,23 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_movimentos_pagamento_credito
   ON public.movimentos_saldo (pagamento_id)
   WHERE (tipo = 'credito');
 
--- 4. RPC: Bloqueio e transição atômica de pagamento para 'processando'
--- Evita que requisições concorrentes disparem mais de uma transferência Pix para o mesmo pagamento
+-- 3.1 Helper para identificar a empresa detentora de um pagamento
+CREATE OR REPLACE FUNCTION public.empresa_do_pagamento(_pagamento_id uuid)
+RETURNS uuid
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = public
+AS $$
+  SELECT public.empresa_do_fechamento(p.fechamento_id)
+  FROM public.pagamentos p
+  WHERE p.id = _pagamento_id;
+$$;
+
+REVOKE ALL ON FUNCTION public.empresa_do_pagamento(uuid) FROM public, anon;
+GRANT EXECUTE ON FUNCTION public.empresa_do_pagamento(uuid) TO authenticated, service_role;
+
+-- 4. RPC: Bloqueio e transição atômica de pagamento para 'processando' com validação estrita de tenant
 CREATE OR REPLACE FUNCTION public.iniciar_processamento_pagamento_pix(_pagamento_id uuid)
 RETURNS jsonb
 LANGUAGE plpgsql
@@ -45,7 +60,37 @@ SET search_path = public
 AS $$
 DECLARE
   v_pagamento RECORD;
+  v_empresa_real uuid;
 BEGIN
+  -- 1. Consulta e validação da empresa real do pagamento
+  v_empresa_real := public.empresa_do_pagamento(_pagamento_id);
+  IF v_empresa_real IS NULL THEN
+    RETURN jsonb_build_object('ok', false, 'erro', 'Pagamento não localizado ou desvinculado de fechamento válido.');
+  END IF;
+
+  -- 2. Validação estrita de autenticação, tenant e permissão financeira
+  IF auth.uid() IS NOT NULL THEN
+    IF NOT (public.eh_equipe_plataforma()) THEN
+      -- Verifica vínculo ativo com a empresa do pagamento
+      IF NOT EXISTS (
+        SELECT 1 FROM public.usuarios u
+        WHERE u.id = auth.uid()
+          AND u.empresa_id = v_empresa_real
+          AND u.ativo = true
+      ) THEN
+        RAISE EXCEPTION 'Acesso negado: usuário não possui vínculo ativo com a agência do pagamento.';
+      END IF;
+
+      -- Verifica capacidade financeira ou role admin
+      IF NOT (
+        public.tem_capacidade(auth.uid(), 'financeiro.gerenciar')
+        OR public.has_role(auth.uid(), 'admin')
+      ) THEN
+        RAISE EXCEPTION 'Acesso negado: permissão de gestão financeira necessária para processar Pix.';
+      END IF;
+    END IF;
+  END IF;
+
   -- Bloqueio pessimista de linha (FOR UPDATE)
   SELECT id, valor, status, fechamento_id, chave_idempotencia
   INTO v_pagamento
@@ -84,7 +129,7 @@ BEGIN
 END;
 $$;
 
--- 5. RPC: Efetivação atômica de Pix e lançamento contábil de débito
+-- 5. RPC: Efetivação atômica de Pix e lançamento contábil de débito com validação de tenant
 CREATE OR REPLACE FUNCTION public.efetivar_pagamento_pix_db(
   _pagamento_id uuid,
   _empresa_id uuid,
@@ -103,7 +148,40 @@ AS $$
 DECLARE
   v_pagamento RECORD;
   v_status_enum public.status_pagamento;
+  v_empresa_real uuid;
 BEGIN
+  -- 1. Consulta e validação da empresa real do pagamento
+  v_empresa_real := public.empresa_do_pagamento(_pagamento_id);
+  IF v_empresa_real IS NULL THEN
+    RETURN jsonb_build_object('ok', false, 'erro', 'Pagamento não localizado.');
+  END IF;
+
+  -- 2. Rejeição explícita de qualquer _empresa_id divergente da empresa real
+  IF _empresa_id IS NOT NULL AND _empresa_id <> v_empresa_real THEN
+    RAISE EXCEPTION 'Acesso negado: empresa informada divergente da organização dona do pagamento.';
+  END IF;
+
+  -- 3. Validação de usuário autenticado, vínculo ativo e permissão financeira
+  IF auth.uid() IS NOT NULL THEN
+    IF NOT (public.eh_equipe_plataforma()) THEN
+      IF NOT EXISTS (
+        SELECT 1 FROM public.usuarios u
+        WHERE u.id = auth.uid()
+          AND u.empresa_id = v_empresa_real
+          AND u.ativo = true
+      ) THEN
+        RAISE EXCEPTION 'Acesso negado: usuário não possui vínculo ativo com a agência do pagamento.';
+      END IF;
+
+      IF NOT (
+        public.tem_capacidade(auth.uid(), 'financeiro.gerenciar')
+        OR public.has_role(auth.uid(), 'admin')
+      ) THEN
+        RAISE EXCEPTION 'Acesso negado: permissão financeira necessária para efetivar pagamentos.';
+      END IF;
+    END IF;
+  END IF;
+
   SELECT id, valor, status
   INTO v_pagamento
   FROM public.pagamentos
@@ -131,7 +209,7 @@ BEGIN
       atualizado_em = now()
   WHERE id = _pagamento_id;
 
-  -- Insere débito contábil caso ainda não exista (protegido por índice único parcial)
+  -- Insere débito contábil garantido usando SEMPRE a empresa real
   IF NOT EXISTS (
     SELECT 1 FROM public.movimentos_saldo
     WHERE pagamento_id = _pagamento_id AND tipo = 'debito'
@@ -143,7 +221,7 @@ BEGIN
       descricao,
       pagamento_id
     ) VALUES (
-      _empresa_id,
+      v_empresa_real,
       'debito',
       v_pagamento.valor,
       _descricao_debito,
@@ -155,8 +233,7 @@ BEGIN
 END;
 $$;
 
--- 6. RPC: Reversão / Estorno atômico de transferência Pix
--- Executa a alteração de status e o crédito de estorno dentro da mesma transação ACID
+-- 6. RPC: Reversão / Estorno atômico de transferência Pix com validação de tenant
 CREATE OR REPLACE FUNCTION public.reverter_transferencia_pagamento_pix(
   _pagamento_id uuid,
   _status_final text,
@@ -173,7 +250,33 @@ DECLARE
   v_mov_debito RECORD;
   v_status_enum public.status_pagamento;
   v_desc text;
+  v_empresa_real uuid;
 BEGIN
+  v_empresa_real := public.empresa_do_pagamento(_pagamento_id);
+  IF v_empresa_real IS NULL THEN
+    RETURN jsonb_build_object('ok', false, 'erro', 'Pagamento não encontrado.');
+  END IF;
+
+  IF auth.uid() IS NOT NULL THEN
+    IF NOT (public.eh_equipe_plataforma()) THEN
+      IF NOT EXISTS (
+        SELECT 1 FROM public.usuarios u
+        WHERE u.id = auth.uid()
+          AND u.empresa_id = v_empresa_real
+          AND u.ativo = true
+      ) THEN
+        RAISE EXCEPTION 'Acesso negado: usuário não possui vínculo ativo com a agência do pagamento.';
+      END IF;
+
+      IF NOT (
+        public.tem_capacidade(auth.uid(), 'financeiro.gerenciar')
+        OR public.has_role(auth.uid(), 'admin')
+      ) THEN
+        RAISE EXCEPTION 'Acesso negado: permissão financeira necessária para reverter pagamentos.';
+      END IF;
+    END IF;
+  END IF;
+
   SELECT id, valor, status
   INTO v_pagamento
   FROM public.pagamentos
@@ -218,7 +321,7 @@ BEGIN
         descricao,
         pagamento_id
       ) VALUES (
-        v_mov_debito.empresa_id,
+        v_empresa_real,
         'credito',
         v_mov_debito.valor,
         v_desc,
@@ -231,7 +334,11 @@ BEGIN
 END;
 $$;
 
--- 7. Permissões de execução para as novas funções
+-- 7. Revogação de privilégios públicos e concessão exclusiva a autenticados autorizados e service_role
+REVOKE ALL ON FUNCTION public.iniciar_processamento_pagamento_pix(uuid) FROM public, anon;
+REVOKE ALL ON FUNCTION public.efetivar_pagamento_pix_db(uuid, uuid, text, text, timestamptz, text, text, text) FROM public, anon;
+REVOKE ALL ON FUNCTION public.reverter_transferencia_pagamento_pix(uuid, text, text, text) FROM public, anon;
+
 GRANT EXECUTE ON FUNCTION public.iniciar_processamento_pagamento_pix(uuid) TO authenticated, service_role;
 GRANT EXECUTE ON FUNCTION public.efetivar_pagamento_pix_db(uuid, uuid, text, text, timestamptz, text, text, text) TO authenticated, service_role;
 GRANT EXECUTE ON FUNCTION public.reverter_transferencia_pagamento_pix(uuid, text, text, text) TO authenticated, service_role;

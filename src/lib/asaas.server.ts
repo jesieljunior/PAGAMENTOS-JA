@@ -208,6 +208,18 @@ export async function obterCobrancaAsaas(cobrancaId: string) {
   return chamar<{ id: string; status: string; paymentDate?: string }>(`/payments/${cobrancaId}`);
 }
 
+export async function buscarCobrancaPorReferencia(referenciaExterna: string) {
+  return chamar<{
+    data: Array<{
+      id: string;
+      status: string;
+      paymentDate?: string;
+      value?: number;
+      invoiceUrl?: string;
+    }>;
+  }>(`/payments?externalReference=${encodeURIComponent(referenciaExterna)}&limit=1`);
+}
+
 /** Tipo da chave Pix inferido pelo formato, como o Asaas espera. */
 export function tipoChavePix(chave: string): "CPF" | "CNPJ" | "EMAIL" | "PHONE" | "EVP" {
   const digitos = chave.replace(/\D+/g, "");

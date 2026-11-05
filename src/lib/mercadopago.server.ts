@@ -268,6 +268,35 @@ export async function verificarStatusAssinaturaEmpresa(
       }
     }
 
+    if (assinatura.status === "ativa") {
+      const res: ResultadoVerificacaoAssinatura = {
+        status: "ativo",
+        pago: true,
+        bloqueado: false,
+        proximoVencimento: null,
+      };
+      cacheVerificacoes.set(empresaId, {
+        resultado: res,
+        expiraEm: agora + 60_000,
+      });
+      return res;
+    }
+
+    if (assinatura.status === "pendente" || assinatura.status === "aguardando_pagamento") {
+      const res: ResultadoVerificacaoAssinatura = {
+        status: "pendente",
+        pago: false,
+        bloqueado: true,
+        motivo:
+          "Pagamento da assinatura pendente de confirmação pelo gateway Asaas. Efetue o pagamento para liberar as operações.",
+      };
+      cacheVerificacoes.set(empresaId, {
+        resultado: res,
+        expiraEm: agora + 30_000,
+      });
+      return res;
+    }
+
     if (assinatura.status === "bloqueada") {
       const res: ResultadoVerificacaoAssinatura = {
         status: "vencido",
@@ -281,74 +310,36 @@ export async function verificarStatusAssinaturaEmpresa(
       });
       return res;
     }
-  }
 
-  // 2. Obter token do Mercado Pago da plataforma ou da conta conectada
-  const tokenPlataforma =
-    process.env["MERCADOPAGO_ACCESS_TOKEN"] ||
-    process.env["MERCADO_PAGO_ACCESS_TOKEN"] ||
-    process.env["MP_ACCESS_TOKEN"];
-
-  const tokenEfetivo = tokenPlataforma || mpConta?.access_token_cifrado;
-
-  // Se não houver token do Mercado Pago configurado em ambiente de desenvolvimento,
-  // ou for plano Free sem provedor de cobrança, não bloqueia por padrão
-  if (!tokenEfetivo) {
-    const isFree = assinatura?.plano?.codigo === "free" || assinatura?.plano?.mensalidade === 0;
-    const res: ResultadoVerificacaoAssinatura = {
-      status: isFree ? "isento" : "ativo",
-      pago: true,
-      bloqueado: false,
-      motivo: isFree ? "Plano gratuito sem cobrança." : "Ambiente sem gateway.",
-    };
-    cacheVerificacoes.set(empresaId, {
-      resultado: res,
-      expiraEm: agora + 60_000,
-    });
-    return res;
-  }
-
-  // Extrair subscriptionId se estiver registrado em observações ou escopos
-  let subscriptionId: string | undefined;
-  if (assinatura?.observacoes) {
-    try {
-      const obs = JSON.parse(assinatura.observacoes);
-      if (obs?.mp_preapproval_id || obs?.subscriptionId) {
-        subscriptionId = obs.mp_preapproval_id || obs.subscriptionId;
-      }
-    } catch {
-      // observações puras de texto
+    if (assinatura.status === "cancelada") {
+      const res: ResultadoVerificacaoAssinatura = {
+        status: "cancelado",
+        pago: false,
+        bloqueado: true,
+        motivo: "Assinatura cancelada. Contrate um novo plano para reativar o acesso.",
+      };
+      cacheVerificacoes.set(empresaId, {
+        resultado: res,
+        expiraEm: agora + 30_000,
+      });
+      return res;
     }
   }
 
-  // 3. Consultar API do Mercado Pago
-  const resultadoApi = await consultarAssinaturaMercadoPagoApi({
-    accessToken: tokenEfetivo,
-    subscriptionId,
-    empresaId,
-  });
-
-  // Gravar no cache por 60 segundos
+  // 2. Se for plano Free ou agência sem plano comercial configurado, trata como isento
+  const isFree =
+    !assinatura || assinatura?.plano?.codigo === "free" || assinatura?.plano?.mensalidade === 0;
+  const res: ResultadoVerificacaoAssinatura = {
+    status: isFree ? "isento" : "ativo",
+    pago: true,
+    bloqueado: false,
+    motivo: isFree ? "Plano gratuito sem cobrança." : undefined,
+  };
   cacheVerificacoes.set(empresaId, {
-    resultado: resultadoApi,
+    resultado: res,
     expiraEm: agora + 60_000,
   });
-
-  // Se estiver bloqueado, sincronizar com o status da assinatura no banco se aplicável
-  if (resultadoApi.bloqueado && assinatura?.id) {
-    const novoStatusBanco = resultadoApi.status === "cancelado" ? "cancelada" : "bloqueada";
-    if (assinatura.status !== novoStatusBanco && assinatura.status !== "trial") {
-      await supabaseAdmin
-        .from("assinaturas")
-        .update({
-          status: novoStatusBanco,
-          atualizado_em: new Date().toISOString(),
-        })
-        .eq("id", assinatura.id);
-    }
-  }
-
-  return resultadoApi;
+  return res;
 }
 
 /**

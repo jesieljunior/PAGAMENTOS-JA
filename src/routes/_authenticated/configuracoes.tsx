@@ -358,6 +358,7 @@ function IntegracaoMercadoPago() {
   const [clientSecret, setClientSecret] = useState("");
   const [ambiente, setAmbiente] = useState<"sandbox" | "producao">("sandbox");
   const [mostrarToken, setMostrarToken] = useState(false);
+  const [mostrarLegado, setMostrarLegado] = useState(false);
 
   const statusQuery = useQuery({
     queryKey: ["mercado-pago-config"],
@@ -379,17 +380,15 @@ function IntegracaoMercadoPago() {
       queryClient.invalidateQueries({ queryKey: ["mercado-pago-config"] });
       setAccessToken("");
       setClientSecret("");
-      toast.success("Credenciais do Mercado Pago salvas e ativadas com sucesso!");
+      toast.success("Credenciais arquivadas com sucesso.");
     },
     onError: (e: Error) => toast.error(e.message),
   });
 
-  const webhookUrl =
+  const asaasWebhookUrl =
     typeof window !== "undefined"
-      ? `${window.location.origin}/api/public/webhooks/mercadopago`
-      : "https://ja.swali.com.br/api/public/webhooks/mercadopago";
-
-  const conectado = statusQuery.data?.conectado ?? false;
+      ? `${window.location.origin}/api/public/webhooks/asaas`
+      : "https://ja.swali.com.br/api/public/webhooks/asaas";
 
   return (
     <section className="mt-6 max-w-2xl border-t border-border pt-5 space-y-4">
@@ -397,165 +396,46 @@ function IntegracaoMercadoPago() {
         <div>
           <div className="flex items-center gap-2">
             <CreditCard className="size-4 text-primary" />
-            <h2 className="text-sm font-semibold text-foreground">Integração Mercado Pago</h2>
+            <h2 className="text-sm font-semibold text-foreground">
+              Gateway Financeiro Unificado — Asaas v3
+            </h2>
           </div>
           <p className="text-xs text-muted-foreground mt-0.5">
-            Configure suas credenciais para processamento de cobranças e faturas do SaaS Já.
+            Toda a tesouraria, split de taxas, repasses Pix e faturas de planos operam
+            exclusivamente pelo ecossistema oficial Asaas.
           </p>
         </div>
 
         <div className="flex items-center gap-1.5">
-          {conectado ? (
-            <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/15 px-2.5 py-0.5 text-xs font-semibold text-emerald-700 dark:text-emerald-300">
-              <CheckCircle2 className="size-3.5" />
-              Conectado & Ativo
-            </span>
-          ) : (
-            <span className="inline-flex items-center gap-1 rounded-full bg-amber-500/15 px-2.5 py-0.5 text-xs font-semibold text-amber-700 dark:text-amber-300">
-              Pendente de Configuração
-            </span>
-          )}
+          <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/15 px-2.5 py-0.5 text-xs font-semibold text-emerald-700 dark:text-emerald-300">
+            <CheckCircle2 className="size-3.5" />
+            Asaas Ativo & Integrado
+          </span>
         </div>
       </div>
 
-      <div className="rounded-lg bg-muted/40 p-3.5 text-xs text-muted-foreground space-y-1.5 border border-border">
+      <div className="rounded-lg bg-muted/40 p-3.5 text-xs text-muted-foreground space-y-2 border border-border">
         <p className="font-semibold text-foreground flex items-center gap-1.5">
           <ShieldCheck className="size-4 text-primary" />
-          Isolamento Regulatório Financeiro
+          Segregação Financeira e Liquidação Atômica
         </p>
         <p>
-          As cobranças de faturas do SaaS Já ocorrem de forma 100% segregada das reservas
-          operacionais e dos pagamentos Pix dos trabalhadores.
+          O sistema Já utiliza o Asaas de forma unificada: os repasses Pix aos colaboradores e as
+          faturas de assinatura do SaaS operam com total conformidade contábil, conciliação
+          automática por webhooks idempotentes e isolamento estrito de tenant.
         </p>
-      </div>
-
-      {conectado && statusQuery.data?.conta ? (
-        <div className="rounded-md border border-border bg-card p-3.5 space-y-2 text-xs">
-          <p className="font-medium text-foreground">Conta vinculada atualmente:</p>
-          <div className="grid grid-cols-2 gap-2 text-muted-foreground">
-            <div>
-              <span>ID da Aplicação: </span>
-              <strong className="text-foreground">
-                {statusQuery.data.conta.mercadoPagoUserId}
-              </strong>
-            </div>
-            <div>
-              <span>Status: </span>
-              <strong className="text-emerald-600 uppercase">
-                {statusQuery.data.conta.status}
-              </strong>
-            </div>
-          </div>
-          <p className="text-[11px] text-muted-foreground">
-            Para atualizar suas chaves ou alternar o ambiente, preencha o formulário abaixo.
-          </p>
-        </div>
-      ) : null}
-
-      <form
-        onSubmit={(e) => {
-          e.preventDefault();
-          salvar.mutate();
-        }}
-        className="space-y-3.5"
-      >
-        <div className="grid gap-3 sm:grid-cols-2">
-          <div className="space-y-1.5">
-            <Label htmlFor="mp-app-id" className="text-xs">
-              Application ID (App ID)
-            </Label>
-            <Input
-              id="mp-app-id"
-              placeholder="Ex: 123456789012345"
-              value={applicationId}
-              onChange={(e) => setApplicationId(e.target.value)}
-              required
-            />
-          </div>
-
-          <div className="space-y-1.5">
-            <Label htmlFor="mp-ambiente" className="text-xs">
-              Ambiente Mercado Pago
-            </Label>
-            <Select
-              value={ambiente}
-              onValueChange={(v) => setAmbiente(v as "sandbox" | "producao")}
-            >
-              <SelectTrigger id="mp-ambiente">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="sandbox">Sandbox / Homologação (Testes)</SelectItem>
-                <SelectItem value="producao">Produção (Cobrança Real)</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-        </div>
-
-        <div className="space-y-1.5">
-          <Label htmlFor="mp-public-key" className="text-xs">
-            Public Key (Chave Pública)
+        <div className="pt-2">
+          <Label className="text-xs text-foreground font-medium">
+            URL Oficial do Webhook Asaas
           </Label>
-          <Input
-            id="mp-public-key"
-            placeholder="APP_USR-..."
-            value={publicKey}
-            onChange={(e) => setPublicKey(e.target.value)}
-          />
-        </div>
-
-        <div className="space-y-1.5">
-          <div className="flex items-center justify-between">
-            <Label htmlFor="mp-access-token" className="text-xs">
-              Access Token (Token de Acesso de Produção ou Teste)
-            </Label>
-            <button
-              type="button"
-              className="text-[11px] text-primary flex items-center gap-1 hover:underline"
-              onClick={() => setMostrarToken(!mostrarToken)}
-            >
-              {mostrarToken ? <EyeOff className="size-3" /> : <Eye className="size-3" />}
-              {mostrarToken ? "Ocultar" : "Mostrar"}
-            </button>
-          </div>
-          <div className="relative">
-            <Input
-              id="mp-access-token"
-              type={mostrarToken ? "text" : "password"}
-              placeholder="APP_USR-... ou TEST-..."
-              value={accessToken}
-              onChange={(e) => setAccessToken(e.target.value)}
-              required
-              className="pr-9"
-            />
-            <Lock className="size-3.5 absolute right-3 top-3 text-muted-foreground pointer-events-none" />
-          </div>
-        </div>
-
-        <div className="space-y-1.5">
-          <Label htmlFor="mp-client-secret" className="text-xs">
-            Client Secret (Opcional para homologação OAuth)
-          </Label>
-          <Input
-            id="mp-client-secret"
-            type="password"
-            placeholder="Chave secreta da aplicação"
-            value={clientSecret}
-            onChange={(e) => setClientSecret(e.target.value)}
-          />
-        </div>
-
-        {/* Webhook Endpoint Info */}
-        <div className="space-y-1.5 pt-1">
-          <Label className="text-xs text-muted-foreground">URL para Webhooks no Mercado Pago</Label>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 mt-1">
             <Input
               readOnly
-              value={webhookUrl}
+              value={asaasWebhookUrl}
               className="font-mono text-xs bg-muted/50 cursor-pointer"
               onClick={() => {
-                navigator.clipboard.writeText(webhookUrl);
-                toast.success("URL de webhook copiada.");
+                navigator.clipboard.writeText(asaasWebhookUrl);
+                toast.success("URL de webhook do Asaas copiada.");
               }}
             />
             <Button
@@ -564,31 +444,114 @@ function IntegracaoMercadoPago() {
               size="sm"
               className="shrink-0 text-xs"
               onClick={() => {
-                navigator.clipboard.writeText(webhookUrl);
-                toast.success("URL de webhook copiada para a área de transferência.");
+                navigator.clipboard.writeText(asaasWebhookUrl);
+                toast.success("URL de webhook do Asaas copiada.");
               }}
             >
               <Copy className="size-3 mr-1" />
               Copiar
             </Button>
           </div>
-          <p className="text-[11px] text-muted-foreground">
-            Cadastre esta URL no painel de desenvolvedores do Mercado Pago para receber notificações
-            instantâneas de pagamentos de faturas.
-          </p>
         </div>
+      </div>
 
-        <Button type="submit" disabled={salvar.isPending} className="mt-2 font-semibold">
-          {salvar.isPending ? (
-            <>
-              <RefreshCw className="size-3.5 mr-2 animate-spin" />
-              Salvando credenciais...
-            </>
-          ) : (
-            "Salvar Credenciais do Mercado Pago"
-          )}
-        </Button>
-      </form>
+      <div className="rounded-md border border-amber-500/20 bg-amber-500/5 p-3.5 text-xs text-muted-foreground space-y-2">
+        <div className="flex items-center justify-between">
+          <span className="font-medium text-amber-900 dark:text-amber-200">
+            Mercado Pago: Integração Cancelada / Descontinuada
+          </span>
+          <button
+            type="button"
+            className="text-[11px] text-primary hover:underline"
+            onClick={() => setMostrarLegado(!mostrarLegado)}
+          >
+            {mostrarLegado ? "Ocultar detalhes legados" : "Ver detalhes legados"}
+          </button>
+        </div>
+        <p className="text-[11px]">
+          Conforme diretriz técnica e regulatória, todo o sistema gira em torno do Asaas. A cobrança
+          de mensalidades e repasses pelo Mercado Pago foi desativada em favor da liquidação
+          unificada do Asaas.
+        </p>
+
+        {mostrarLegado ? (
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              salvar.mutate();
+            }}
+            className="space-y-3 pt-2 border-t border-amber-500/20"
+          >
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div className="space-y-1">
+                <Label htmlFor="mp-app-id" className="text-xs">
+                  Application ID Legado
+                </Label>
+                <Input
+                  id="mp-app-id"
+                  placeholder="Ex: 123456789012345"
+                  value={applicationId}
+                  onChange={(e) => setApplicationId(e.target.value)}
+                />
+              </div>
+              <div className="space-y-1">
+                <Label htmlFor="mp-ambiente" className="text-xs">
+                  Ambiente
+                </Label>
+                <Select
+                  value={ambiente}
+                  onValueChange={(v) => setAmbiente(v as "sandbox" | "producao")}
+                >
+                  <SelectTrigger id="mp-ambiente">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="sandbox">Sandbox</SelectItem>
+                    <SelectItem value="producao">Produção</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+
+            <div className="space-y-1">
+              <div className="flex items-center justify-between">
+                <Label htmlFor="mp-access-token" className="text-xs">
+                  Token de Acesso Legado
+                </Label>
+                <button
+                  type="button"
+                  className="text-[11px] text-primary flex items-center gap-1 hover:underline"
+                  onClick={() => setMostrarToken(!mostrarToken)}
+                >
+                  {mostrarToken ? <EyeOff className="size-3" /> : <Eye className="size-3" />}
+                  {mostrarToken ? "Ocultar" : "Mostrar"}
+                </button>
+              </div>
+              <div className="relative">
+                <Input
+                  id="mp-access-token"
+                  type={mostrarToken ? "text" : "password"}
+                  placeholder="APP_USR-... ou TEST-..."
+                  value={accessToken}
+                  onChange={(e) => setAccessToken(e.target.value)}
+                  className="pr-9"
+                />
+                <Lock className="size-3.5 absolute right-3 top-3 text-muted-foreground pointer-events-none" />
+              </div>
+            </div>
+
+            <Button
+              type="submit"
+              variant="outline"
+              size="sm"
+              disabled={salvar.isPending}
+              className="mt-1"
+            >
+              {salvar.isPending ? "Salvando..." : "Salvar Arquivo Legado"}
+            </Button>
+          </form>
+        ) : null}
+      </div>
     </section>
   );
 }

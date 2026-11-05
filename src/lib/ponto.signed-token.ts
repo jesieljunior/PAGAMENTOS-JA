@@ -16,8 +16,31 @@ export interface PayloadQrCodePonto {
   exp: number; // timestamp ms
 }
 
-const SECRET =
-  process.env["PONTO_SIGNING_SECRET"] || "swali_ponto_digital_safe_secret_key_2026_x89a1c";
+let segredoDevEmMemoria: string | null = null;
+
+function obterSegredoAssinatura(): string {
+  const segredo =
+    process.env["PONTO_SIGNING_SECRET"] ||
+    process.env["JWT_SECRET"] ||
+    process.env["SUPABASE_JWT_SECRET"];
+
+  if (segredo && segredo.trim().length >= 32) {
+    return segredo.trim();
+  }
+
+  // Em ambientes de produção ou homologação real, rejeita terminantemente ausência de chave forte
+  if (process.env["NODE_ENV"] === "production" || process.env["VERCEL_ENV"] === "production") {
+    throw new Error(
+      "Falha de segurança crítica: PONTO_SIGNING_SECRET obrigatório não configurado ou menor que 32 caracteres.",
+    );
+  }
+
+  // Em testes e desenvolvimento local, gera chave criptográfica aleatória e efêmera por processo (sem strings fixas no código)
+  if (!segredoDevEmMemoria) {
+    segredoDevEmMemoria = crypto.randomBytes(32).toString("hex");
+  }
+  return segredoDevEmMemoria;
+}
 
 /**
  * Cria um token assinado e autocontido para o QR Code do evento.
@@ -71,7 +94,10 @@ export function criarTokenQrCodeAssinado(
 
   const payloadJson = JSON.stringify(payload);
   const payloadB64 = Buffer.from(payloadJson, "utf8").toString("base64url");
-  const signature = crypto.createHmac("sha256", SECRET).update(payloadB64).digest("base64url");
+  const signature = crypto
+    .createHmac("sha256", obterSegredoAssinatura())
+    .update(payloadB64)
+    .digest("base64url");
 
   return `qr.${payloadB64}.${signature}`;
 }
@@ -96,7 +122,10 @@ export function decodificarTokenQrCode(token: string): PayloadQrCodePonto | null
   }
 
   // Verifica assinatura HMAC
-  const esperada = crypto.createHmac("sha256", SECRET).update(payloadB64).digest("base64url");
+  const esperada = crypto
+    .createHmac("sha256", obterSegredoAssinatura())
+    .update(payloadB64)
+    .digest("base64url");
 
   if (signature.length !== esperada.length) {
     return null;
@@ -112,12 +141,9 @@ export function decodificarTokenQrCode(token: string): PayloadQrCodePonto | null
     const raw = Buffer.from(payloadB64, "base64url").toString("utf8");
     const payload = JSON.parse(raw) as PayloadQrCodePonto;
 
-    // Valida expiração
-    if (Date.now() > payload.exp) {
-      // Tolerância de 12 horas para eventos recentes
-      if (Date.now() - payload.exp < 12 * 60 * 60_000) {
-        return payload;
-      }
+    // Valida expiração estrita: tolerância máxima de 30 segundos apenas para desvio leve de relógio
+    const TOLERANCIA_DESVIO_RELOGIO_MS = 30_000;
+    if (Date.now() > payload.exp + TOLERANCIA_DESVIO_RELOGIO_MS) {
       return null;
     }
 

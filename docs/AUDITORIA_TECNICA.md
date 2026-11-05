@@ -100,6 +100,21 @@
   - Eventos de reversão (`TRANSFER_FAILED`, `TRANSFER_CANCELLED`, `TRANSFER_REVERSED`) executam a alteração de status do pagamento e a inserção do crédito de estorno dentro da mesma transação ACID no PostgreSQL.
   - O crédito de estorno é protegido pelo índice único parcial `idx_movimentos_pagamento_credito`, impedindo duplo estorno sob múltiplas entregas do parceiro bancário.
 
+### 4.4. Validação Estrita de Tenant em RPCs Financeiras Security Definer
+
+- **Vulnerabilidade Mitigada:** Funções `SECURITY DEFINER` no PostgreSQL contornam as políticas de RLS e executam com privilégios de superusuário/owner. Sem validação explícita de tenant no corpo da função, um usuário autenticado da Empresa A poderia enviar o UUID de um pagamento da Empresa B.
+- **Implementação (Migração `20261104140000_finance_tenant_security_and_saas_invoicing.sql`):**
+  - Foi criado o helper `public.empresa_do_pagamento(_pagamento_id uuid)` que resolve deterministicamente o tenant a partir da cadeia `pagamentos ➔ fechamentos ➔ escalas ➔ equipes ➔ eventos ➔ empresa`.
+  - As funções `iniciar_processamento_pagamento_pix`, `efetivar_pagamento_pix_db` e `reverter_transferencia_pagamento_pix` agora validam explicitamente se `auth.uid() IS NOT NULL`:
+    `IF NOT (public.eh_equipe_plataforma() OR v_empresa_pagamento = public.empresa_atual()) THEN RAISE EXCEPTION 'Acesso negado: você não tem permissão para esta operação.'; END IF;`
+  - Permissões de execução foram expressamente revogadas para `public` e `anon`.
+
+### 4.5. Conciliação de Faturas SaaS e Descontinuação Unificada do Mercado Pago
+
+- **Prevenção de Fraude em Faturas SaaS:** A função `confirmarPagamentoFaturaPlano` em `src/lib/cobranca.functions.ts` foi blindada contra fraudes de auto-quitação. Um tenant autenticado não pode mais alterar unilateralmente uma fatura para `pago`. A função consulta ativamente a API oficial do Asaas (`buscarCobrancaPorReferencia` / `obterCobrancaAsaas`) para validar se o pagamento está com status `RECEIVED`, `CONFIRMED` ou `RECEIVED_IN_CASH`. Somente após validação do gateway (ou conciliação por operador com permissão de plataforma), a fatura é liquidada e a assinatura ativada.
+- **Liquidação Automática via Webhook Asaas:** A rota `/api/public/webhooks/asaas` processa os eventos `PAYMENT_RECEIVED` e `PAYMENT_CONFIRMED` verificando se o identificador ou `externalReference` pertence a uma fatura SaaS (`faturas_plataforma`), executando a RPC atômica `liquidar_fatura_plataforma_asaas` de forma completamente segregada das cobranças de _funding_ operacional de clientes.
+- **Unificação no Asaas e Desativação do Mercado Pago:** Todo o ecossistema financeiro (repasses Pix, custódia de clientes e cobrança de planos SaaS) foi unificado no Asaas v3. O fluxo legado via Mercado Pago foi formalmente descontinuado.
+
 ---
 
 ## 5. Auditoria de Antifraude do Ponto Eletrônico, Resiliência Serverless e LGPD
@@ -110,7 +125,9 @@
 2. **Resiliência Serverless (Multi-instâncias / Vercel):**
    - O registro de ponto em `src/lib/ponto.functions.ts` possui resolução nativa diretamente no PostgreSQL quando executado em containers serverless frios ou instâncias paralelas.
    - O endpoint `identificarNoPonto` consulta o histórico real de marcações no PostgreSQL, impedindo que colaboradores recebam visualizações desatualizadas devido a instâncias distintas da Vercel.
-3. **QR Code Dinâmico e Assinado:** Expira automaticamente após o evento (tolerância máxima de 12 horas). Tokens criptograficamente assinados (`qr.<payload>.<hmac>`) permitem validação independente de sessões em memória.
+3. **QR Code Criptografado com Expiração Estrita e Zero Hardcoded Secret:**
+   - O módulo `src/lib/ponto.signed-token.ts` teve seu segredo estático padrão removido; ele exige variáveis de ambiente do servidor (`PONTO_SIGNING_SECRET`, `JWT_SECRET` ou `SUPABASE_JWT_SECRET`). Em produção, a ausência de chave resulta em erro fail-closed.
+   - A expiração do token é estrita no timestamp informado pelo evento, com tolerância máxima de 30 segundos apenas para desvio leve de relógio de rede (`clock drift`), eliminando a janela arbitrária de 12 horas.
 4. **Geolocalização Haversine:** A coordenada GPS informada pelo navegador móvel do colaborador é validada contra a latitude/longitude do evento com raio de tolerância configurável (300m a 1000m).
 5. **Máquina de Estados de Marcações:** A ordem cronológica `Entrada` ➔ `Início de Intervalo` ➔ `Fim de Intervalo` ➔ `Saída` é estritamente exigida. Batidas repetidas ou fora de ordem são rejeitadas.
 6. **Trilha de Auditoria Pública:** Toda tentativa de registro gera registro imutável em `auditoria_ponto_publico` com status, tipo e detalhes técnicos.
@@ -126,3 +143,4 @@
 - **Script Automatizado:** `scripts/scan-secrets.mjs` executado sobre todo o repositório (`src/`, `scripts/`, `supabase/`, `drizzle/`, `docs/`, `public/`).
 - **Resultado:** **0 segredos encontrados, 0 CPFs ou dados pessoais reais identificados.**
 - **Conformidade de Seeds e Testes:** Todos os CPFs, CNPJs e telefones utilizados em fixtures e testes automatizados são mocks sintéticos desprovidos de titularidade humana.
+

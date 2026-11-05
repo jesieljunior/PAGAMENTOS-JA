@@ -175,7 +175,7 @@ export async function enviarPix(supabase: any, pagamentoId: string, empresaId?: 
 
     const descricaoDebito = `Pix para ${freelancer?.nome ?? "freelancer"}`;
 
-    // 2. Tenta efetivação transacional atômica via RPC no PostgreSQL
+    // 2. Efetivação transacional atômica via RPC no PostgreSQL
     let efetivadoViaRpc = false;
     try {
       const { data: resEfetivacao, error: errEfetivacao } = await supabase.rpc(
@@ -191,78 +191,37 @@ export async function enviarPix(supabase: any, pagamentoId: string, empresaId?: 
           _descricao_debito: descricaoDebito,
         },
       );
-      if (!errEfetivacao && resEfetivacao?.ok) {
+      if (errEfetivacao) {
+        throw new Error(errEfetivacao.message);
+      }
+      if (resEfetivacao && typeof resEfetivacao === "object") {
+        if (!resEfetivacao.ok) {
+          throw new Error(resEfetivacao.erro || "Falha na liquidação contábil transacional.");
+        }
         efetivadoViaRpc = true;
       }
-    } catch {
-      efetivadoViaRpc = false;
+    } catch (e) {
+      if (
+        e instanceof Error &&
+        !e.message.includes("function") &&
+        !e.message.includes("does not exist")
+      ) {
+        console.error("[pagamentos] Erro crítico na liquidação transacional atômica:", e);
+        await supabase
+          .from("pagamentos")
+          .update({
+            erro: `Atenção crítica: Transferência criada no parceiro (${transferencia.id}), mas falhou na liquidação contábil transacional: ${e.message}`,
+          })
+          .eq("id", pagamento.id);
+        throw e;
+      }
     }
 
-    // 3. Fallback estruturado com verificação estrita caso a RPC não esteja presente
     if (!efetivadoViaRpc) {
-      const payloadAtualizacao: Record<string, unknown> = {
-        status: statusFinal,
-        executado_em: executadoEm,
-        txid_parceiro: transferencia.id,
-        parceiro_transferencia_id: transferencia.id,
-        chave_pix_destino: chavePix,
-        erro: erroMsg,
-      };
-
-      let { error: errUpdate } = await supabase
-        .from("pagamentos")
-        .update(payloadAtualizacao)
-        .eq("id", pagamento.id);
-
-      // Fallback defensivo caso o banco ainda não tenha rodado a migration com os novos valores de enum
-      if (errUpdate && (statusFinal === "processando" || statusFinal === "aguardando_aprovacao")) {
-        const fallbackPayload = {
-          ...payloadAtualizacao,
-          status: "pendente",
-          erro: `[${statusFinal}] ${erroMsg ?? "Em processamento pelo Asaas"}`,
-        };
-        const resFallback = await supabase
-          .from("pagamentos")
-          .update(fallbackPayload)
-          .eq("id", pagamento.id);
-        errUpdate = resFallback.error;
-      }
-      if (errUpdate) {
-        console.error("[pagamentos] Erro ao registrar status final do pagamento:", errUpdate);
-        throw errUpdate;
-      }
-
-      // Registra débito em conta protegido contra duplicação
-      const { data: movimentoExistente } = await supabase
-        .from("movimentos_saldo")
-        .select("id")
-        .eq("pagamento_id", pagamento.id)
-        .eq("tipo", "debito")
-        .maybeSingle();
-
-      if (!movimentoExistente) {
-        const { error: erroDebito } = await supabase.from("movimentos_saldo").insert({
-          empresa_id: empresaDestino,
-          tipo: "debito",
-          valor,
-          descricao: descricaoDebito,
-          pagamento_id: pagamento.id,
-        });
-
-        // 23505 = índice único parcial de débito já registrado por processo concorrente
-        if (erroDebito && erroDebito.code !== "23505") {
-          console.error("[pagamentos] Erro crítico ao inserir débito de saldo:", erroDebito);
-          await supabase
-            .from("pagamentos")
-            .update({
-              erro: `Atenção: Transferência criada (${transferencia.id}), mas falhou ao gravar débito contábil: ${erroDebito.message}`,
-            })
-            .eq("id", pagamento.id);
-          throw new Error(
-            `Transferência iniciada, mas falhou ao registrar débito contábil: ${erroDebito.message}`,
-          );
-        }
-      }
+      // Fail closed: não permite split-write inconsistente
+      throw new Error(
+        `Falha crítica na efetivação contábil do pagamento: a função RPC transacional não está disponível ou falhou. Transferência Asaas: ${transferencia.id}`,
+      );
     }
 
     return {

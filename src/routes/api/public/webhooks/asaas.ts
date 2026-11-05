@@ -97,21 +97,41 @@ export const Route = createFileRoute("/api/public/webhooks/asaas")({
             timedOut
           ) {
             if (tentativas >= 5) {
-              console.warn(
-                `[webhook asaas] Evento ${chaveIdempotencia} atingiu o limite de ${tentativas} tentativas. Interrompendo reprocessamento.`,
+              console.error(
+                `[webhook asaas] Evento ${chaveIdempotencia} atingiu o limite de ${tentativas} tentativas. Registrando para reconciliação manual.`,
               );
-              return new Response("ok", { status: 200 });
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+              await (supabaseAdmin as any)
+                .from("webhook_eventos")
+                .update({
+                  status: "falhou",
+                  erro: `Limite de tentativas excedido (${tentativas}). Requer reconciliação manual.`,
+                  atualizado_em: new Date().toISOString(),
+                })
+                .eq("id", eventoExistente.id);
+              return new Response(
+                "Limite de tentativas excedido para o evento. Requer reconciliação manual.",
+                { status: 500 },
+              );
             }
 
+            // Compare-And-Swap (CAS) atômico para impedir que instâncias concorrentes retomem simultaneamente
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            await (supabaseAdmin as any)
+            const { data: casUpdate } = await (supabaseAdmin as any)
               .from("webhook_eventos")
               .update({
                 status: "processando",
                 tentativas: tentativas + 1,
                 atualizado_em: new Date().toISOString(),
               })
-              .eq("id", eventoExistente.id);
+              .eq("id", eventoExistente.id)
+              .eq("status", eventoExistente.status)
+              .select("id");
+
+            if (!casUpdate || (Array.isArray(casUpdate) && casUpdate.length === 0)) {
+              // Outra instância concorrente assumiu a retomada
+              return new Response("ok", { status: 200 });
+            }
           } else {
             // Em processamento ativo por outra instância há menos de 5 min -> ignora duplicação simultânea
             return new Response("ok", { status: 200 });
@@ -119,7 +139,84 @@ export const Route = createFileRoute("/api/public/webhooks/asaas")({
         }
 
         try {
-          // 2. Confirmação de cobrança de funding/cliente paga
+          // 2. Confirmação de fatura SaaS da plataforma (Planos e Assinaturas Já)
+          if (PAGAS.has(evento) && (corpo.payment?.id || corpo.payment?.externalReference)) {
+            const faturaIdRef = corpo.payment.externalReference;
+            const parceiroId = corpo.payment.id;
+
+            let faturaPlataforma: {
+              id: string;
+              status: string;
+              total: number;
+              empresa_id: string;
+            } | null = null;
+
+            if (faturaIdRef) {
+              const { data: f } = await supabaseAdmin
+                .from("faturas_plataforma")
+                .select("id, status, total, empresa_id")
+                .eq("id", faturaIdRef)
+                .maybeSingle();
+              if (f) faturaPlataforma = f;
+            }
+
+            if (!faturaPlataforma && parceiroId) {
+              const { data: f } = await supabaseAdmin
+                .from("faturas_plataforma")
+                .select("id, status, total, empresa_id")
+                .eq("referencia_provedor", parceiroId)
+                .maybeSingle();
+              if (f) faturaPlataforma = f;
+            }
+
+            if (
+              faturaPlataforma &&
+              faturaPlataforma.status !== "pago" &&
+              faturaPlataforma.status !== "paga"
+            ) {
+              let liquidadaRpc = false;
+              try {
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                const { data: resRpc, error: errRpc } = await (supabaseAdmin.rpc as any)(
+                  "liquidar_fatura_plataforma_asaas",
+                  {
+                    _fatura_id: faturaPlataforma.id,
+                    _parceiro_id: parceiroId,
+                    _valor: corpo.payment?.value ?? faturaPlataforma.total,
+                  },
+                );
+                if (!errRpc && resRpc && (resRpc as { ok?: boolean }).ok) {
+                  liquidadaRpc = true;
+                }
+              } catch {
+                liquidadaRpc = false;
+              }
+
+              if (!liquidadaRpc) {
+                const agora = new Date().toISOString();
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                await (supabaseAdmin.from("faturas_plataforma") as any)
+                  .update({
+                    status: "pago",
+                    referencia_provedor: parceiroId,
+                    provedor: "asaas",
+                    pago_em: agora,
+                    atualizado_em: agora,
+                  })
+                  .eq("id", faturaPlataforma.id);
+
+                await supabaseAdmin
+                  .from("assinaturas")
+                  .update({
+                    status: "ativa",
+                    atualizado_em: agora,
+                  })
+                  .eq("empresa_id", faturaPlataforma.empresa_id);
+              }
+            }
+          }
+
+          // 2.1 Confirmação de cobrança de funding/cliente paga (Saldo operacional para repasse Pix)
           if (PAGAS.has(evento) && corpo.payment?.id) {
             const { data: cobranca } = await supabaseAdmin
               .from("cobrancas")
@@ -176,6 +273,14 @@ export const Route = createFileRoute("/api/public/webhooks/asaas")({
               .from("cobrancas")
               .update({ status: "vencido" })
               .eq("parceiro_cobranca_id", corpo.payment.id);
+
+            // Atualiza também se for fatura SaaS
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            await (supabaseAdmin.from("faturas_plataforma") as any)
+              .update({ status: "vencida", atualizado_em: new Date().toISOString() })
+              .or(
+                `referencia_provedor.eq.${corpo.payment.id},id.eq.${corpo.payment.externalReference ?? ""}`,
+              );
           }
 
           // 3. Transferências Pix aos Freelancers: Sucesso terminal confirmado

@@ -12,6 +12,10 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as AuthenticatedRouteRouteImport } from './routes/_authenticated/route'
 import { Route as AuthRouteImport } from './routes/auth'
+import { Route as PrivacidadeRouteImport } from './routes/privacidade'
+import { Route as ReembolsoRouteImport } from './routes/reembolso'
+import { Route as SolicitarExclusaoRouteImport } from './routes/solicitar-exclusao'
+import { Route as TermosRouteImport } from './routes/termos'
 import { Route as AuthenticatedAcessosTesteRouteImport } from './routes/_authenticated/acessos-teste'
 import { Route as AuthenticatedAdminRouteImport } from './routes/_authenticated/admin'
 import { Route as AuthenticatedClientesRouteImport } from './routes/_authenticated/clientes'
@@ -49,6 +53,26 @@ const AuthenticatedRouteRoute = AuthenticatedRouteRouteImport.update({
 const AuthRoute = AuthRouteImport.update({
   id: '/auth',
   path: '/auth',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const PrivacidadeRoute = PrivacidadeRouteImport.update({
+  id: '/privacidade',
+  path: '/privacidade',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ReembolsoRoute = ReembolsoRouteImport.update({
+  id: '/reembolso',
+  path: '/reembolso',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const SolicitarExclusaoRoute = SolicitarExclusaoRouteImport.update({
+  id: '/solicitar-exclusao',
+  path: '/solicitar-exclusao',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const TermosRoute = TermosRouteImport.update({
+  id: '/termos',
+  path: '/termos',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AuthenticatedAcessosTesteRoute =
@@ -185,6 +209,10 @@ const ApiPublicWebhooksAsaasRoute = ApiPublicWebhooksAsaasRouteImport.update({
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/auth': typeof AuthRoute
+  '/privacidade': typeof PrivacidadeRoute
+  '/reembolso': typeof ReembolsoRoute
+  '/solicitar-exclusao': typeof SolicitarExclusaoRoute
+  '/termos': typeof TermosRoute
   '/acessos-teste': typeof AuthenticatedAcessosTesteRoute
   '/admin': typeof AuthenticatedAdminRoute
   '/clientes': typeof AuthenticatedClientesRoute
@@ -213,6 +241,10 @@ export interface FileRoutesByFullPath {
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/auth': typeof AuthRoute
+  '/privacidade': typeof PrivacidadeRoute
+  '/reembolso': typeof ReembolsoRoute
+  '/solicitar-exclusao': typeof SolicitarExclusaoRoute
+  '/termos': typeof TermosRoute
   '/acessos-teste': typeof AuthenticatedAcessosTesteRoute
   '/admin': typeof AuthenticatedAdminRoute
   '/clientes': typeof AuthenticatedClientesRoute
@@ -243,6 +275,10 @@ export interface FileRoutesById {
   '/': typeof IndexRoute
   '/_authenticated': typeof AuthenticatedRouteRouteWithChildren
   '/auth': typeof AuthRoute
+  '/privacidade': typeof PrivacidadeRoute
+  '/reembolso': typeof ReembolsoRoute
+  '/solicitar-exclusao': typeof SolicitarExclusaoRoute
+  '/termos': typeof TermosRoute
   '/_authenticated/acessos-teste': typeof AuthenticatedAcessosTesteRoute
   '/_authenticated/admin': typeof AuthenticatedAdminRoute
   '/_authenticated/clientes': typeof AuthenticatedClientesRoute
@@ -273,6 +309,10 @@ export interface FileRouteTypes {
   fullPaths:
     | '/'
     | '/auth'
+    | '/privacidade'
+    | '/reembolso'
+    | '/solicitar-exclusao'
+    | '/termos'
     | '/acessos-teste'
     | '/admin'
     | '/clientes'
@@ -301,6 +341,10 @@ export interface FileRouteTypes {
   to:
     | '/'
     | '/auth'
+    | '/privacidade'
+    | '/reembolso'
+    | '/solicitar-exclusao'
+    | '/termos'
     | '/acessos-teste'
     | '/admin'
     | '/clientes'
@@ -330,6 +374,10 @@ export interface FileRouteTypes {
     | '/'
     | '/_authenticated'
     | '/auth'
+    | '/privacidade'
+    | '/reembolso'
+    | '/solicitar-exclusao'
+    | '/termos'
     | '/_authenticated/acessos-teste'
     | '/_authenticated/admin'
     | '/_authenticated/clientes'
@@ -360,6 +408,10 @@ export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AuthenticatedRouteRoute: typeof AuthenticatedRouteRouteWithChildren
   AuthRoute: typeof AuthRoute
+  PrivacidadeRoute: typeof PrivacidadeRoute
+  ReembolsoRoute: typeof ReembolsoRoute
+  SolicitarExclusaoRoute: typeof SolicitarExclusaoRoute
+  TermosRoute: typeof TermosRoute
   PontoTokenRoute: typeof PontoTokenRoute
   ApiInternalProcessarPagamentosRoute: typeof ApiInternalProcessarPagamentosRoute
   ApiInternalPurgarSelfiesPontoRoute: typeof ApiInternalPurgarSelfiesPontoRoute
@@ -388,6 +440,34 @@ declare module '@tanstack/react-router' {
       path: '/auth'
       fullPath: '/auth'
       preLoaderRoute: typeof AuthRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/privacidade': {
+      id: '/privacidade'
+      path: '/privacidade'
+      fullPath: '/privacidade'
+      preLoaderRoute: typeof PrivacidadeRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/reembolso': {
+      id: '/reembolso'
+      path: '/reembolso'
+      fullPath: '/reembolso'
+      preLoaderRoute: typeof ReembolsoRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/solicitar-exclusao': {
+      id: '/solicitar-exclusao'
+      path: '/solicitar-exclusao'
+      fullPath: '/solicitar-exclusao'
+      preLoaderRoute: typeof SolicitarExclusaoRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/termos': {
+      id: '/termos'
+      path: '/termos'
+      fullPath: '/termos'
+      preLoaderRoute: typeof TermosRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/_authenticated/acessos-teste': {
@@ -612,6 +692,10 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AuthenticatedRouteRoute: AuthenticatedRouteRouteWithChildren,
   AuthRoute: AuthRoute,
+  PrivacidadeRoute: PrivacidadeRoute,
+  ReembolsoRoute: ReembolsoRoute,
+  SolicitarExclusaoRoute: SolicitarExclusaoRoute,
+  TermosRoute: TermosRoute,
   PontoTokenRoute: PontoTokenRoute,
   ApiInternalProcessarPagamentosRoute: ApiInternalProcessarPagamentosRoute,
   ApiInternalPurgarSelfiesPontoRoute: ApiInternalPurgarSelfiesPontoRoute,
