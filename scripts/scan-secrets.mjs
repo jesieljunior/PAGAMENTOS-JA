@@ -11,6 +11,7 @@ const SECRET_PATTERNS = [
   { name: "AWS Secret Key", regex: /aws_secret_access_key\s*=\s*['"][A-Za-z0-9/+=]{40}['"]/ },
   { name: "Private RSA Key", regex: /-----BEGIN RSA PRIVATE KEY-----/ },
   { name: "Private EC Key", regex: /-----BEGIN EC PRIVATE KEY-----/ },
+  { name: "Hardcoded QR Signing Secret", regex: /swali_ponto_digital_safe_secret_key/i },
   { name: "Hardcoded DB Password", regex: /postgres(ql)?:\/\/[^:]+:([^@\s]{6,})@/ },
 ];
 
