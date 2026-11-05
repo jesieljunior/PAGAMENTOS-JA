@@ -751,7 +751,9 @@ export const confirmarPagamentoFaturaPlano = createServerFn({ method: "POST" })
       }
     } catch (errGateway) {
       console.error("[confirmarPagamentoFaturaPlano] Erro ao consultar gateway Asaas:", errGateway);
-      throw new Error("Não foi possível validar o pagamento com o Asaas no momento. Tente novamente em instantes.");
+      throw new Error(
+        "Não foi possível validar o pagamento com o Asaas no momento. Tente novamente em instantes.",
+      );
     }
 
     if (!confirmadoGateway || valorConfirmadoGateway === null) {
@@ -783,7 +785,9 @@ export const confirmarPagamentoFaturaPlano = createServerFn({ method: "POST" })
     }
 
     if (!liquidadoViaRpc) {
-      throw new Error("Liquidação atômica indisponível. A fatura permanece pendente para nova tentativa.");
+      throw new Error(
+        "Liquidação atômica indisponível. A fatura permanece pendente para nova tentativa.",
+      );
     }
 
     // 3. Auditoria
