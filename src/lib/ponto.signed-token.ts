@@ -100,8 +100,16 @@ export function decodificarTokenQrCode(token: string): PayloadQrCodePonto | null
     return null;
   }
 
-  // Verifica assinatura HMAC
-  const esperada = crypto.createHmac("sha256", SECRET).update(payloadB64).digest("base64url");
+  // Sem segredo configurado, a validação falha fechada.
+  let esperada: string;
+  try {
+    esperada = crypto
+      .createHmac("sha256", obterSegredoAssinatura())
+      .update(payloadB64)
+      .digest("base64url");
+  } catch {
+    return null;
+  }
 
   if (signature.length !== esperada.length) {
     return null;
