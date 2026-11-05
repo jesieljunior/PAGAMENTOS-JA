@@ -174,6 +174,28 @@ export const Route = createFileRoute("/api/public/webhooks/asaas")({
               faturaPlataforma.status !== "pago" &&
               faturaPlataforma.status !== "paga"
             ) {
+              if (!parceiroId) {
+                throw new Error("Evento de pagamento SaaS sem identificador da cobrança Asaas.");
+              }
+
+              // O payload do webhook não é prova suficiente: consulta a cobrança na API oficial.
+              const { obterCobrancaAsaas } = await import("@/lib/asaas.server");
+              const cobrancaVerificada = await obterCobrancaAsaas(parceiroId);
+              const statusPagos = new Set(["RECEIVED", "CONFIRMED", "RECEIVED_IN_CASH"]);
+              const valorAsaas = Number(cobrancaVerificada.value);
+
+              if (
+                cobrancaVerificada.id !== parceiroId ||
+                cobrancaVerificada.externalReference !== faturaPlataforma.id ||
+                !statusPagos.has(cobrancaVerificada.status) ||
+                !Number.isFinite(valorAsaas) ||
+                Math.abs(valorAsaas - Number(faturaPlataforma.total)) >= 0.005
+              ) {
+                throw new Error(
+                  "Cobrança Asaas não corresponde à fatura, ao status pago ou ao valor integral esperado.",
+                );
+              }
+
               let liquidadaRpc = false;
               try {
                 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -182,7 +204,7 @@ export const Route = createFileRoute("/api/public/webhooks/asaas")({
                   {
                     _fatura_id: faturaPlataforma.id,
                     _parceiro_id: parceiroId,
-                    _valor: corpo.payment?.value ?? null,
+                    _valor: valorAsaas,
                   },
                 );
                 if (!errRpc && resRpc && (resRpc as { ok?: boolean }).ok) {
