@@ -115,9 +115,9 @@ export const Route = createFileRoute("/api/public/webhooks/asaas")({
               );
             }
 
-            // Compare-And-Swap (CAS) atômico para impedir que instâncias concorrentes retomem simultaneamente
+            // Compare-And-Swap: status + contador impedem duas instâncias de retomarem a mesma tentativa.
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            const { data: casUpdate } = await (supabaseAdmin as any)
+            let casQuery = (supabaseAdmin as any)
               .from("webhook_eventos")
               .update({
                 status: "processando",
@@ -125,8 +125,14 @@ export const Route = createFileRoute("/api/public/webhooks/asaas")({
                 atualizado_em: new Date().toISOString(),
               })
               .eq("id", eventoExistente.id)
-              .eq("status", eventoExistente.status)
-              .select("id");
+              .eq("status", eventoExistente.status);
+
+            casQuery =
+              eventoExistente.tentativas == null
+                ? casQuery.is("tentativas", null)
+                : casQuery.eq("tentativas", tentativas);
+
+            const { data: casUpdate } = await casQuery.select("id");
 
             if (!casUpdate || (Array.isArray(casUpdate) && casUpdate.length === 0)) {
               // Outra instância concorrente assumiu a retomada
