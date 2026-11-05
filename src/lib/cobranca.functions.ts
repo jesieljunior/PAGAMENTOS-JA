@@ -594,8 +594,12 @@ export const selecionarPlanoEmpresa = createServerFn({ method: "POST" })
       }
 
       if (!faturaPersistida) {
-        const detalhe = resultadoFaturaCliente.error?.message ?? "O banco não retornou o ID da fatura.";
-        throw new Error(`Não foi possível persistir a fatura antes de criar a cobrança: ${detalhe}`);
+        const detalhe =
+          resultadoFaturaCliente.error?.message ??
+          "O banco não retornou o ID da fatura.";
+        throw new Error(
+          `Não foi possível persistir a fatura antes de criar a cobrança: ${detalhe}`,
+        );
       }
 
       // Consulta dados cadastrais da empresa para emissão real no Asaas
