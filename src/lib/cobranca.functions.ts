@@ -750,6 +750,7 @@ export const confirmarPagamentoFaturaPlano = createServerFn({ method: "POST" })
           if (
             cobranca &&
             statusPagosAsaas.has(cobranca.status) &&
+            cobranca.externalReference === data.faturaId &&
             Number.isFinite(Number(cobranca.value)) &&
             Math.abs(Number(cobranca.value) - Number(fatura.total)) < 0.005
           ) {
