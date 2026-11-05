@@ -12,6 +12,8 @@ SET search_path = public
 AS $$
 DECLARE
   v_fatura RECORD;
+  v_assinatura_id uuid;
+  v_assinaturas_count integer;
 BEGIN
   IF auth.role() IS DISTINCT FROM 'service_role' THEN
     RAISE EXCEPTION 'Liquidação de fatura SaaS permitida somente por serviço autenticado.';
@@ -25,7 +27,7 @@ BEGIN
     RAISE EXCEPTION 'Valor confirmado pelo provedor é obrigatório.';
   END IF;
 
-  SELECT id, empresa_id, assinatura_id, status, total
+  SELECT id, empresa_id, assinatura_id, plano_id, status, total
   INTO v_fatura
   FROM public.faturas_plataforma
   WHERE id = _fatura_id
@@ -47,6 +49,40 @@ BEGIN
     RAISE EXCEPTION 'Status da fatura não permite liquidação: %', v_fatura.status;
   END IF;
 
+  -- Resolve exatamente uma assinatura vinculada à fatura.
+  -- Faturas legadas sem assinatura_id só podem prosseguir quando houver
+  -- uma única assinatura pendente para a mesma empresa e plano.
+  IF v_fatura.assinatura_id IS NOT NULL THEN
+    SELECT id
+    INTO v_assinatura_id
+    FROM public.assinaturas
+    WHERE id = v_fatura.assinatura_id
+      AND empresa_id = v_fatura.empresa_id
+      AND plano_id = v_fatura.plano_id
+    FOR UPDATE;
+
+    IF NOT FOUND THEN
+      RAISE EXCEPTION 'Assinatura vinculada à fatura não corresponde à empresa e ao plano.';
+    END IF;
+  ELSE
+    SELECT count(*), (array_agg(id))[1]
+    INTO v_assinaturas_count, v_assinatura_id
+    FROM public.assinaturas
+    WHERE empresa_id = v_fatura.empresa_id
+      AND plano_id = v_fatura.plano_id
+      AND status = 'pendente';
+
+    IF v_assinaturas_count <> 1 THEN
+      RAISE EXCEPTION 'Não foi possível resolver uma única assinatura pendente para a fatura (encontradas: %).',
+        v_assinaturas_count;
+    END IF;
+
+    PERFORM 1
+    FROM public.assinaturas
+    WHERE id = v_assinatura_id
+    FOR UPDATE;
+  END IF;
+
   UPDATE public.faturas_plataforma
   SET status = 'pago',
       referencia_provedor = _parceiro_id,
@@ -55,14 +91,13 @@ BEGIN
       atualizado_em = now()
   WHERE id = _fatura_id;
 
-  IF v_fatura.assinatura_id IS NOT NULL THEN
-    UPDATE public.assinaturas
-    SET status = 'ativa', atualizado_em = now()
-    WHERE id = v_fatura.assinatura_id;
-  ELSE
-    UPDATE public.assinaturas
-    SET status = 'ativa', atualizado_em = now()
-    WHERE empresa_id = v_fatura.empresa_id;
+  UPDATE public.assinaturas
+  SET status = 'ativa', atualizado_em = now()
+  WHERE id = v_assinatura_id
+    AND empresa_id = v_fatura.empresa_id;
+
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'Assinatura da fatura não foi encontrada para ativação.';
   END IF;
 
   INSERT INTO public.logs_auditoria (
