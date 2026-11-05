@@ -282,3 +282,11 @@ export async function transferirPix(dados: {
 
   return transferencia;
 }
+
+/** Busca a cobrança pelo identificador externo da fatura; não confia em confirmação do navegador. */
+export async function obterCobrancasPorReferenciaAsaas(referenciaExterna: string) {
+  const query = new URLSearchParams({ externalReference: referenciaExterna, limit: "10" });
+  return chamar<{ data: { id: string; status: string; value: number; externalReference?: string }[] }>(
+    `/payments?${query.toString()}`,
+  );
+}
