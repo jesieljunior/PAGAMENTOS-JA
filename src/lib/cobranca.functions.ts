@@ -448,26 +448,49 @@ export const selecionarPlanoEmpresa = createServerFn({ method: "POST" })
         }
       }
     } else {
-      const { error: erroInsert } = await client.from("assinaturas").insert({
+      const novaAssinaturaPayload = {
         empresa_id: empresaId,
         plano_id: plano.id,
         status: ehGratuito ? "trial" : "pendente",
         trial_ate: trialAte,
-      });
+      };
 
-      if (erroInsert && admin) {
-        try {
-          const { error: erroAdmin } = await admin.from("assinaturas").insert({
-            empresa_id: empresaId,
-            plano_id: plano.id,
-            status: ehGratuito ? "trial" : "pendente",
-            trial_ate: trialAte,
-          });
-          if (erroAdmin) throw new Error(erroAdmin.message);
-        } catch {
-          // prossegue
+      let novaAssinatura: { id: string; plano_id: string; status: string } | null = null;
+      let erroCriacaoAssinatura: string | null = null;
+
+      const resultadoCliente = await client
+        .from("assinaturas")
+        .insert(novaAssinaturaPayload)
+        .select("id, plano_id, status")
+        .maybeSingle();
+
+      if (resultadoCliente.error) {
+        erroCriacaoAssinatura = resultadoCliente.error.message;
+      } else if (resultadoCliente.data?.id) {
+        novaAssinatura = resultadoCliente.data;
+      }
+
+      if (!novaAssinatura && admin) {
+        const resultadoAdmin = await admin
+          .from("assinaturas")
+          .insert(novaAssinaturaPayload)
+          .select("id, plano_id, status")
+          .maybeSingle();
+
+        if (resultadoAdmin.error) {
+          erroCriacaoAssinatura = resultadoAdmin.error.message;
+        } else if (resultadoAdmin.data?.id) {
+          novaAssinatura = resultadoAdmin.data;
         }
       }
+
+      if (!novaAssinatura) {
+        throw new Error(
+          `Não foi possível criar a assinatura da empresa: ${erroCriacaoAssinatura ?? "ID da assinatura não retornado."}`,
+        );
+      }
+
+      assinaturaExistente = novaAssinatura;
     }
 
     // Abre novo ciclo com o plano escolhido
@@ -525,58 +548,54 @@ export const selecionarPlanoEmpresa = createServerFn({ method: "POST" })
       const vencimentoIso = new Date(Date.now() + 3 * 24 * 60 * 60_000).toISOString();
       const cicloFimIso = new Date(Date.now() + 30 * 24 * 60 * 60_000).toISOString();
 
-      try {
-        const { data: faturaInserida } = await client
+      const faturaPayload = {
+        id: faturaId,
+        empresa_id: empresaId,
+        assinatura_id: assinaturaExistente.id,
+        plano_id: plano.id,
+        plano_nome: plano.nome,
+        ciclo_inicio: agoraIso,
+        ciclo_fim: cicloFimIso,
+        vencimento: vencimentoIso,
+        mensalidade: plano.mensalidade,
+        participacoes_incluidas: plano.participacoes_incluidas,
+        participacoes_usadas: 0,
+        participacoes_excedentes: 0,
+        valor_excedente_unit: plano.valor_excedente,
+        valor_excedente_total: 0,
+        total: plano.mensalidade,
+        status: "pendente" as const,
+        provedor: "asaas" as const,
+      };
+
+      let faturaPersistida = false;
+      const resultadoFaturaCliente = await client
+        .from("faturas_plataforma")
+        .insert(faturaPayload)
+        .select("id")
+        .maybeSingle();
+
+      if (!resultadoFaturaCliente.error && resultadoFaturaCliente.data?.id) {
+        faturaId = resultadoFaturaCliente.data.id;
+        faturaPersistida = true;
+      }
+
+      if (!faturaPersistida && admin) {
+        const resultadoFaturaAdmin = await admin
           .from("faturas_plataforma")
-          .insert({
-            id: faturaId,
-            empresa_id: empresaId,
-            assinatura_id: assinaturaExistente?.id ?? null,
-            plano_id: plano.id,
-            plano_nome: plano.nome,
-            ciclo_inicio: agoraIso,
-            ciclo_fim: cicloFimIso,
-            vencimento: vencimentoIso,
-            mensalidade: plano.mensalidade,
-            participacoes_incluidas: plano.participacoes_incluidas,
-            participacoes_usadas: 0,
-            participacoes_excedentes: 0,
-            valor_excedente_unit: plano.valor_excedente,
-            valor_excedente_total: 0,
-            total: plano.mensalidade,
-            status: "pendente",
-            provedor: "asaas",
-          })
+          .insert(faturaPayload)
           .select("id")
           .maybeSingle();
 
-        if (faturaInserida?.id) faturaId = faturaInserida.id;
-      } catch (errFatura) {
-        if (admin) {
-          try {
-            await admin.from("faturas_plataforma").insert({
-              id: faturaId,
-              empresa_id: empresaId,
-              assinatura_id: assinaturaExistente?.id ?? null,
-              plano_id: plano.id,
-              plano_nome: plano.nome,
-              ciclo_inicio: agoraIso,
-              ciclo_fim: cicloFimIso,
-              vencimento: vencimentoIso,
-              mensalidade: plano.mensalidade,
-              participacoes_incluidas: plano.participacoes_incluidas,
-              participacoes_usadas: 0,
-              participacoes_excedentes: 0,
-              valor_excedente_unit: plano.valor_excedente,
-              valor_excedente_total: 0,
-              total: plano.mensalidade,
-              status: "pendente",
-              provedor: "asaas",
-            });
-          } catch {
-            // segue com dados em memória
-          }
+        if (!resultadoFaturaAdmin.error && resultadoFaturaAdmin.data?.id) {
+          faturaId = resultadoFaturaAdmin.data.id;
+          faturaPersistida = true;
         }
+      }
+
+      if (!faturaPersistida) {
+        const detalhe = resultadoFaturaCliente.error?.message ?? "O banco não retornou o ID da fatura.";
+        throw new Error(`Não foi possível persistir a fatura antes de criar a cobrança: ${detalhe}`);
       }
 
       // Consulta dados cadastrais da empresa para emissão real no Asaas
