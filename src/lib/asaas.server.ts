@@ -205,7 +205,7 @@ export async function obterPixCopiaCola(cobrancaId: string): Promise<string | nu
 }
 
 export async function obterCobrancaAsaas(cobrancaId: string) {
-  return chamar<{ id: string; status: string; paymentDate?: string }>(`/payments/${cobrancaId}`);
+  return chamar<{ id: string; status: string; value?: number; externalReference?: string; paymentDate?: string }>(`/payments/${cobrancaId}`);
 }
 
 export async function buscarCobrancaPorReferencia(referenciaExterna: string) {
