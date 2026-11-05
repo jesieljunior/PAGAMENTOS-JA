@@ -712,6 +712,7 @@ export const confirmarPagamentoFaturaPlano = createServerFn({ method: "POST" })
 
     let confirmadoGateway = false;
     let parceiroPagamentoId: string | null = fatura.referencia_provedor || null;
+    let valorConfirmadoGateway: number | null = null;
 
     if (ehPlataforma) {
       // Administrador da plataforma realizando conciliação manual autorizada
@@ -726,9 +727,16 @@ export const confirmarPagamentoFaturaPlano = createServerFn({ method: "POST" })
         if (fatura.referencia_provedor) {
           try {
             const cobranca = await obterCobrancaAsaas(fatura.referencia_provedor);
-            if (cobranca && statusPagosAsaas.has(cobranca.status)) {
+            if (
+              cobranca &&
+              statusPagosAsaas.has(cobranca.status) &&
+              cobranca.externalReference === data.faturaId &&
+              Number.isFinite(Number(cobranca.value)) &&
+              Math.abs(Number(cobranca.value) - Number(fatura.total)) < 0.005
+            ) {
               confirmadoGateway = true;
               parceiroPagamentoId = cobranca.id;
+              valorConfirmadoGateway = Number(cobranca.value);
             }
           } catch {
             // Continua para busca por externalReference
@@ -739,9 +747,15 @@ export const confirmarPagamentoFaturaPlano = createServerFn({ method: "POST" })
         if (!confirmadoGateway) {
           const resultado = await buscarCobrancaPorReferencia(data.faturaId);
           const cobranca = resultado.data?.[0];
-          if (cobranca && statusPagosAsaas.has(cobranca.status)) {
+          if (
+            cobranca &&
+            statusPagosAsaas.has(cobranca.status) &&
+            Number.isFinite(Number(cobranca.value)) &&
+            Math.abs(Number(cobranca.value) - Number(fatura.total)) < 0.005
+          ) {
             confirmadoGateway = true;
             parceiroPagamentoId = cobranca.id;
+            valorConfirmadoGateway = Number(cobranca.value);
           }
         }
       } catch (errGateway) {
@@ -772,7 +786,7 @@ export const confirmarPagamentoFaturaPlano = createServerFn({ method: "POST" })
         {
           _fatura_id: data.faturaId,
           _parceiro_id: parceiroPagamentoId || `manual_${data.metodo}`,
-          _valor: fatura.total,
+          _valor: ehPlataforma ? Number(fatura.total) : valorConfirmadoGateway,
         },
       );
       if (!errRpc && resRpc?.ok) {
@@ -783,22 +797,7 @@ export const confirmarPagamentoFaturaPlano = createServerFn({ method: "POST" })
     }
 
     if (!liquidadoViaRpc) {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      await (dbClient.from("faturas_plataforma") as any)
-        .update({
-          status: "pago",
-          referencia_provedor: parceiroPagamentoId || fatura.referencia_provedor,
-          provedor: "asaas",
-          pago_em: agoraIso,
-          atualizado_em: agoraIso,
-        })
-        .eq("id", data.faturaId)
-        .eq("empresa_id", empresaId);
-
-      await dbClient
-        .from("assinaturas")
-        .update({ status: "ativa", atualizado_em: agoraIso })
-        .eq("empresa_id", empresaId);
+      throw new Error("Liquidação atômica indisponível. A fatura permanece pendente para nova tentativa.");
     }
 
     // 3. Auditoria
