@@ -425,7 +425,7 @@ export const selecionarPlanoEmpresa = createServerFn({ method: "POST" })
 
     const patchAssinatura = {
       plano_id: plano.id,
-      status: ehGratuito ? "trial" : "ativa",
+      status: ehGratuito ? "trial" : "pendente",
       trial_ate: trialAte,
       atualizado_em: new Date().toISOString(),
     };
@@ -451,7 +451,7 @@ export const selecionarPlanoEmpresa = createServerFn({ method: "POST" })
       const { error: erroInsert } = await client.from("assinaturas").insert({
         empresa_id: empresaId,
         plano_id: plano.id,
-        status: ehGratuito ? "trial" : "ativa",
+        status: ehGratuito ? "trial" : "pendente",
         trial_ate: trialAte,
       });
 
@@ -460,7 +460,7 @@ export const selecionarPlanoEmpresa = createServerFn({ method: "POST" })
           const { error: erroAdmin } = await admin.from("assinaturas").insert({
             empresa_id: empresaId,
             plano_id: plano.id,
-            status: ehGratuito ? "trial" : "ativa",
+            status: ehGratuito ? "trial" : "pendente",
             trial_ate: trialAte,
           });
           if (erroAdmin) throw new Error(erroAdmin.message);
@@ -688,12 +688,10 @@ export const selecionarPlanoEmpresa = createServerFn({ method: "POST" })
 export const confirmarPagamentoFaturaPlano = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .validator((input: unknown) =>
-    z
-      .object({
-        faturaId: z.string().uuid(),
-        metodo: z.enum(["pix", "cartao"]),
-      })
-      .parse(input),
+    z.object({
+      faturaId: z.string().uuid(),
+      metodo: z.enum(["pix", "cartao"]),
+    }).parse(input),
   )
   .handler(async ({ data, context }) => {
     const org = requireOrganizationContext(context);
@@ -701,10 +699,36 @@ export const confirmarPagamentoFaturaPlano = createServerFn({ method: "POST" })
     if (!empresaId) throw new Error("Agência não identificada.");
 
     const client = context.supabase;
-    const admin = await getAdminClientSafe();
-    const agoraIso = new Date().toISOString();
+    const { data: fatura, error: erroConsulta } = await client
+      .from("faturas_plataforma")
+      .select("id, total, status, provedor")
+      .eq("id", data.faturaId)
+      .eq("empresa_id", empresaId)
+      .maybeSingle();
 
-    const { error: erroFatura } = await client
+    if (erroConsulta || !fatura) throw new Error("Fatura não encontrada para esta agência.");
+    if (fatura.status === "pago") return { ok: true, jaPago: true };
+    if (fatura.status !== "pendente" || fatura.provedor !== "asaas") {
+      throw new Error("Fatura não está pendente ou não pertence ao provedor esperado.");
+    }
+
+    // O cliente nunca declara uma fatura paga. A confirmação é consultada diretamente no Asaas.
+    const { obterCobrancasPorReferenciaAsaas } = await import("./asaas.server");
+    const resposta = await obterCobrancasPorReferenciaAsaas(data.faturaId);
+    const valorEsperado = Number(fatura.total);
+    const cobrancaConfirmada = (resposta.data ?? []).find((item) =>
+      item.externalReference === data.faturaId &&
+      ["RECEIVED", "CONFIRMED", "RECEIVED_IN_CASH"].includes(item.status) &&
+      Number.isFinite(Number(item.value)) &&
+      Math.abs(Number(item.value) - valorEsperado) < 0.005
+    );
+
+    if (!cobrancaConfirmada) {
+      throw new Error("O Asaas ainda não confirmou o pagamento integral desta fatura.");
+    }
+
+    const agoraIso = new Date().toISOString();
+    const { data: faturaAtualizada, error: erroAtualizacao } = await client
       .from("faturas_plataforma")
       .update({
         status: "pago",
@@ -712,45 +736,40 @@ export const confirmarPagamentoFaturaPlano = createServerFn({ method: "POST" })
         atualizado_em: agoraIso,
       })
       .eq("id", data.faturaId)
-      .eq("empresa_id", empresaId);
+      .eq("empresa_id", empresaId)
+      .eq("status", "pendente")
+      .select("id")
+      .maybeSingle();
 
-    if (erroFatura && admin) {
-      try {
-        await admin
-          .from("faturas_plataforma")
-          .update({
-            status: "pago",
-            pago_em: agoraIso,
-            atualizado_em: agoraIso,
-          })
-          .eq("id", data.faturaId)
-          .eq("empresa_id", empresaId);
-      } catch {
-        // prossegue
-      }
+    if (erroAtualizacao || !faturaAtualizada) {
+      throw new Error("Não foi possível liquidar a fatura. Atualize a tela e consulte o status.");
     }
 
-    // Atualiza status da assinatura da agência para ativa
-    await client
+    const { error: erroAssinatura } = await client
       .from("assinaturas")
       .update({ status: "ativa", atualizado_em: agoraIso })
       .eq("empresa_id", empresaId);
-
-    // Auditoria
-    try {
-      await client.from("logs_auditoria").insert({
-        empresa_id: empresaId,
-        ator_id: context.userId,
-        ator_contexto: "organizacao",
-        acao: data.metodo === "pix" ? "fatura_plano_paga_pix" : "fatura_plano_paga_cartao",
-        recurso_tipo: "fatura_plataforma",
-        recurso_id: data.faturaId,
-        resultado: "sucesso",
-        detalhes: { metodo: data.metodo, quitado_em: agoraIso },
-      });
-    } catch {
-      // não-bloqueante
+    if (erroAssinatura) {
+      // A fatura permanece paga; a reconciliação pode reativar a assinatura sem cobrar novamente.
+      console.error("[confirmarPagamentoFaturaPlano] Fatura paga, mas falhou ao ativar assinatura:", erroAssinatura);
+      throw new Error("Pagamento confirmado, mas a ativação da assinatura está pendente de reconciliação.");
     }
+
+    await client.from("logs_auditoria").insert({
+      empresa_id: empresaId,
+      ator_id: context.userId,
+      ator_contexto: "organizacao",
+      acao: "fatura_plano_paga_confirmada_provedor",
+      recurso_tipo: "fatura_plataforma",
+      recurso_id: data.faturaId,
+      resultado: "sucesso",
+      detalhes: {
+        metodo_solicitado: data.metodo,
+        provedor: "asaas",
+        cobranca_id: cobrancaConfirmada.id,
+        quitado_em: agoraIso,
+      },
+    });
 
     return { ok: true };
   });
