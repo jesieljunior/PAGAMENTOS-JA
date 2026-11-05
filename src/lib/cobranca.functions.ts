@@ -642,33 +642,12 @@ export const selecionarPlanoEmpresa = createServerFn({ method: "POST" })
         );
       }
 
-      // Gera código Pix Copia e Cola padrão Banco Central do Brasil como fallback
-      const pixChave = "financeiro@swali.com.br";
-      const nomeBeneficiario = "JA PLATAFORMA";
-      const cidade = "SAO PAULO";
-      const valorStr = plano.mensalidade.toFixed(2);
-      const txid = faturaId.replace(/-/g, "").slice(0, 25);
-
-      const f = (id: string, val: string) => `${id}${String(val.length).padStart(2, "0")}${val}`;
-      const merchantAccount = `${f("00", "br.gov.bcb.pix")}${f("01", pixChave)}`;
-      const additionalData = `${f("05", txid)}`;
-      const payloadBase = `${f("00", "01")}${f("26", merchantAccount)}${f("52", "0000")}${f("53", "986")}${f("54", valorStr)}${f("58", "BR")}${f("59", nomeBeneficiario)}${f("60", cidade)}${f("62", additionalData)}6304`;
-
-      let crc = 0xffff;
-      for (let i = 0; i < payloadBase.length; i++) {
-        crc ^= payloadBase.charCodeAt(i) << 8;
-        for (let j = 0; j < 8; j++) {
-          if ((crc & 0x8000) !== 0) crc = (crc << 1) ^ 0x1021;
-          else crc <<= 1;
-        }
-      }
-      const crcHex = (crc & 0xffff).toString(16).toUpperCase().padStart(4, "0");
-      const pixCopiaColaFallback = `${payloadBase}${crcHex}`;
+      // Não inventa um Pix estático: sem payload oficial do Asaas, o checkout é a única alternativa.
 
       cobrancaInfo = {
         faturaId,
         valor: plano.mensalidade,
-        pixCopiaCola: pixCopiaColaReal || pixCopiaColaFallback,
+        pixCopiaCola: pixCopiaColaReal,
         checkoutUrl: checkoutUrlReal || `/plano?fatura=${faturaId}`,
         vencimento: vencimentoIso,
       };
