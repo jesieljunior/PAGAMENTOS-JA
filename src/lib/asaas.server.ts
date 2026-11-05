@@ -215,6 +215,7 @@ export async function buscarCobrancaPorReferencia(referenciaExterna: string) {
       status: string;
       paymentDate?: string;
       value?: number;
+      externalReference?: string;
       invoiceUrl?: string;
     }>;
   }>(`/payments?externalReference=${encodeURIComponent(referenciaExterna)}&limit=1`);
