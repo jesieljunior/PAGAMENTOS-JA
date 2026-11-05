@@ -705,48 +705,19 @@ export const confirmarPagamentoFaturaPlano = createServerFn({ method: "POST" })
       return { ok: true, jaPaga: true, status: "pago" };
     }
 
-    const ehPlataforma = Boolean(
-      context.contexto?.platformContext ||
-      context.contexto?.papeisPlataforma?.includes("admin_master"),
-    );
-
     let confirmadoGateway = false;
     let parceiroPagamentoId: string | null = fatura.referencia_provedor || null;
     let valorConfirmadoGateway: number | null = null;
 
-    if (ehPlataforma) {
-      // Administrador da plataforma realizando conciliação manual autorizada
-      confirmadoGateway = true;
-    } else {
-      // Validação real e obrigatória com a API oficial do Asaas
-      try {
-        const { buscarCobrancaPorReferencia, obterCobrancaAsaas } = await import("./asaas.server");
-        const statusPagosAsaas = new Set(["RECEIVED", "CONFIRMED", "RECEIVED_IN_CASH"]);
+    // A mesma validação do provedor é obrigatória para qualquer usuário.
+    // Conciliação manual deve ser uma operação administrativa separada, com evidência e trilha próprias.
+    try {
+      const { buscarCobrancaPorReferencia, obterCobrancaAsaas } = await import("./asaas.server");
+      const statusPagosAsaas = new Set(["RECEIVED", "CONFIRMED", "RECEIVED_IN_CASH"]);
 
-        // Tenta buscar pelo referencia_provedor caso já registrado
-        if (fatura.referencia_provedor) {
-          try {
-            const cobranca = await obterCobrancaAsaas(fatura.referencia_provedor);
-            if (
-              cobranca &&
-              statusPagosAsaas.has(cobranca.status) &&
-              cobranca.externalReference === data.faturaId &&
-              Number.isFinite(Number(cobranca.value)) &&
-              Math.abs(Number(cobranca.value) - Number(fatura.total)) < 0.005
-            ) {
-              confirmadoGateway = true;
-              parceiroPagamentoId = cobranca.id;
-              valorConfirmadoGateway = Number(cobranca.value);
-            }
-          } catch {
-            // Continua para busca por externalReference
-          }
-        }
-
-        // Se ainda não confirmado, busca por externalReference (faturaId)
-        if (!confirmadoGateway) {
-          const resultado = await buscarCobrancaPorReferencia(data.faturaId);
-          const cobranca = resultado.data?.[0];
+      if (fatura.referencia_provedor) {
+        try {
+          const cobranca = await obterCobrancaAsaas(fatura.referencia_provedor);
           if (
             cobranca &&
             statusPagosAsaas.has(cobranca.status) &&
@@ -758,22 +729,33 @@ export const confirmarPagamentoFaturaPlano = createServerFn({ method: "POST" })
             parceiroPagamentoId = cobranca.id;
             valorConfirmadoGateway = Number(cobranca.value);
           }
+        } catch {
+          // Continua para busca por externalReference
         }
-      } catch (errGateway) {
-        console.error(
-          "[confirmarPagamentoFaturaPlano] Erro ao consultar gateway Asaas:",
-          errGateway,
-        );
-        throw new Error(
-          "Não foi possível validar o pagamento com o Asaas no momento. Tente novamente em instantes.",
-        );
       }
 
       if (!confirmadoGateway) {
-        throw new Error(
-          "Pagamento ainda não confirmado pelo Asaas. Se você já realizou o pagamento via Pix ou Cartão, aguarde alguns instantes pela compensação bancária e tente novamente.",
-        );
+        const resultado = await buscarCobrancaPorReferencia(data.faturaId);
+        const cobranca = resultado.data?.[0];
+        if (
+          cobranca &&
+          statusPagosAsaas.has(cobranca.status) &&
+          cobranca.externalReference === data.faturaId &&
+          Number.isFinite(Number(cobranca.value)) &&
+          Math.abs(Number(cobranca.value) - Number(fatura.total)) < 0.005
+        ) {
+          confirmadoGateway = true;
+          parceiroPagamentoId = cobranca.id;
+          valorConfirmadoGateway = Number(cobranca.value);
+        }
       }
+    } catch (errGateway) {
+      console.error("[confirmarPagamentoFaturaPlano] Erro ao consultar gateway Asaas:", errGateway);
+      throw new Error("Não foi possível validar o pagamento com o Asaas no momento. Tente novamente em instantes.");
+    }
+
+    if (!confirmadoGateway || valorConfirmadoGateway === null) {
+      throw new Error("Pagamento ainda não confirmado pelo Asaas com o valor integral da fatura.");
     }
 
     // 2. Liquidação atômica da fatura e ativação da assinatura
@@ -787,7 +769,7 @@ export const confirmarPagamentoFaturaPlano = createServerFn({ method: "POST" })
         {
           _fatura_id: data.faturaId,
           _parceiro_id: parceiroPagamentoId || `manual_${data.metodo}`,
-          _valor: ehPlataforma ? Number(fatura.total) : valorConfirmadoGateway,
+          _valor: valorConfirmadoGateway,
         },
       );
       if (!errRpc && resRpc?.ok) {
@@ -806,10 +788,8 @@ export const confirmarPagamentoFaturaPlano = createServerFn({ method: "POST" })
       await dbClient.from("logs_auditoria").insert({
         empresa_id: empresaId,
         ator_id: context.userId,
-        ator_contexto: ehPlataforma ? "plataforma" : "organizacao",
-        acao: ehPlataforma
-          ? "fatura_plano_conciliada_manual"
-          : `fatura_plano_confirmada_${data.metodo}`,
+        ator_contexto: "organizacao",
+        acao: `fatura_plano_confirmada_${data.metodo}`,
         recurso_tipo: "fatura_plataforma",
         recurso_id: data.faturaId,
         resultado: "sucesso",
