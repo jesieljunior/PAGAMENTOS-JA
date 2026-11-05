@@ -16,8 +16,13 @@ export interface PayloadQrCodePonto {
   exp: number; // timestamp ms
 }
 
-const SECRET =
-  process.env["PONTO_SIGNING_SECRET"] || "swali_ponto_digital_safe_secret_key_2026_x89a1c";
+function obterSegredoAssinatura(): string {
+  const secret = process.env["PONTO_SIGNING_SECRET"];
+  if (!secret || Buffer.byteLength(secret, "utf8") < 32) {
+    throw new Error("PONTO_SIGNING_SECRET ausente ou fraco. Configure um segredo aleatório com pelo menos 32 bytes.");
+  }
+  return secret;
+}
 
 /**
  * Cria um token assinado e autocontido para o QR Code do evento.
@@ -71,7 +76,7 @@ export function criarTokenQrCodeAssinado(
 
   const payloadJson = JSON.stringify(payload);
   const payloadB64 = Buffer.from(payloadJson, "utf8").toString("base64url");
-  const signature = crypto.createHmac("sha256", SECRET).update(payloadB64).digest("base64url");
+  const signature = crypto.createHmac("sha256", obterSegredoAssinatura()).update(payloadB64).digest("base64url");
 
   return `qr.${payloadB64}.${signature}`;
 }
@@ -110,18 +115,18 @@ export function decodificarTokenQrCode(token: string): PayloadQrCodePonto | null
 
   try {
     const raw = Buffer.from(payloadB64, "base64url").toString("utf8");
-    const payload = JSON.parse(raw) as PayloadQrCodePonto;
+    const payload = JSON.parse(raw) as Partial<PayloadQrCodePonto>;
+    if (
+      typeof payload.eventoId !== "string" ||
+      typeof payload.empresaId !== "string" ||
+      typeof payload.qr_code_token !== "string" ||
+      typeof payload.exp !== "number" ||
+      !Number.isFinite(payload.exp)
+    ) return null;
 
-    // Valida expiração
-    if (Date.now() > payload.exp) {
-      // Tolerância de 12 horas para eventos recentes
-      if (Date.now() - payload.exp < 12 * 60 * 60_000) {
-        return payload;
-      }
-      return null;
-    }
-
-    return payload;
+    // Expiração estrita: QR expirado não recebe janela extra de validade.
+    if (Date.now() >= payload.exp) return null;
+    return payload as PayloadQrCodePonto;
   } catch {
     return null;
   }
