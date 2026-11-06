@@ -46,6 +46,7 @@ DECLARE
   v_movimento RECORD;
   v_taxa_id uuid;
   v_taxa_valor numeric;
+  v_taxa_status text;
   v_taxas_count integer;
   v_funding_id uuid;
   v_funding_status text;
@@ -110,17 +111,17 @@ BEGIN
   SELECT count(*)
   INTO v_taxas_count
   FROM public.taxas_plataforma
-  WHERE cobranca_id = _cobranca_id AND status = 'pendente';
+  WHERE cobranca_id = _cobranca_id AND status IN ('pendente', 'cobrada');
 
   IF v_taxas_count > 1 THEN
     RAISE EXCEPTION 'Mais de uma taxa pendente encontrada para a cobrança (%).', _cobranca_id;
   END IF;
 
   IF v_taxas_count = 1 THEN
-    SELECT id, valor
-    INTO v_taxa_id, v_taxa_valor
+    SELECT id, valor, status
+    INTO v_taxa_id, v_taxa_valor, v_taxa_status
     FROM public.taxas_plataforma
-    WHERE cobranca_id = _cobranca_id AND status = 'pendente'
+    WHERE cobranca_id = _cobranca_id AND status IN ('pendente', 'cobrada')
     FOR UPDATE;
   END IF;
 
@@ -176,7 +177,7 @@ BEGIN
       atualizado_em = now()
   WHERE id = _cobranca_id;
 
-  IF v_funding_id IS NOT NULL AND v_funding_status = 'pending' THEN
+  IF v_funding_id IS NOT NULL THEN
     UPDATE public.fundings
     SET status = 'available',
         valor_disponivel = v_valor_credito,
@@ -185,7 +186,7 @@ BEGIN
     WHERE id = v_funding_id;
   END IF;
 
-  IF v_taxa_id IS NOT NULL THEN
+  IF v_taxa_id IS NOT NULL AND v_taxa_status = 'pendente' THEN
     UPDATE public.taxas_plataforma
     SET status = 'cobrada',
         atualizado_em = now()

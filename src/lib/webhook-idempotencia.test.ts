@@ -56,6 +56,15 @@ describe("Webhook Asaas: Idempotência e Segurança", () => {
     expect(gerarChaveWebhookAsaas(payloadA)).toBe(gerarChaveWebhookAsaas(payloadB));
   });
 
+  it("rejeita payload legado sem evento ou referência de recurso", () => {
+    expect(() => gerarChaveWebhookAsaas({ event: "PAYMENT_RECEIVED" })).toThrow(
+      /sem ID de evento ou referência/,
+    );
+    expect(() => gerarChaveWebhookAsaas({ payment: { id: "pay_1" } })).toThrow(
+      /sem ID de evento ou referência/,
+    );
+  });
+
   it("gera chaves distintas para pagamentos ou eventos diferentes", () => {
     const payloadA: EventoAsaasWebhook = {
       event: "PAYMENT_RECEIVED",
