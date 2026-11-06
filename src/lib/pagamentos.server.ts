@@ -55,6 +55,23 @@ export async function resolverEmpresaDoPagamento(
   return evento.empresa_id as string;
 }
 
+/**
+ * Só classifica erro HTTP 4xx do POST como falha definitiva quando o Asaas
+ * ainda não retornou um ID de transferência. Depois de receber o ID, qualquer
+ * falha de consulta/contabilização é inconclusiva e exige reconciliação.
+ */
+export function erroHttpAsaasEhDefinitivo(
+  error: unknown,
+  transferenciaId: string | null,
+): boolean {
+  if (transferenciaId || !(error instanceof Error) || !("status" in error)) {
+    return false;
+  }
+
+  const statusHttp = Number((error as Error & { status?: number }).status);
+  return statusHttp >= 400 && statusHttp < 500 && statusHttp !== 408 && statusHttp !== 429;
+}
+
 /** Valida saldo, envia o Pix, debita o saldo sem debitar receita SaaS. */
 export async function enviarPix(supabase: any, pagamentoId: string, empresaId?: string | null) {
   const { data: pagamento } = await supabase
@@ -255,13 +272,11 @@ export async function enviarPix(supabase: any, pagamentoId: string, empresaId?: 
     const mensagem = e instanceof Error ? e.message : mensagemErro;
     mensagemErro = mensagem;
 
-    // Erros de validação/autorização HTTP 4xx (exceto timeout e rate limit)
-    // são respostas definitivas. Falha de rede/5xx é inconclusiva e não libera retry.
-    if (e instanceof Error && "status" in e) {
-      const statusHttp = Number((e as Error & { status?: number }).status);
-      if (statusHttp >= 400 && statusHttp < 500 && statusHttp !== 408 && statusHttp !== 429) {
-        falhaDefinitiva = true;
-      }
+    // Apenas um 4xx do POST sem ID de transferência permite retry.
+    // Depois que o Asaas retorna um ID, qualquer falha local ou de consulta
+    // exige reconciliação; não pode liberar um segundo envio.
+    if (erroHttpAsaasEhDefinitivo(e, transferenciaId)) {
+      falhaDefinitiva = true;
     }
 
     if (travaAdquirida) {
