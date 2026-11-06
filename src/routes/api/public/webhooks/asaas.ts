@@ -12,7 +12,8 @@ import { gerarChaveWebhookAsaas, type EventoAsaasWebhook } from "@/lib/webhook-i
 
 type EventoAsaas = EventoAsaasWebhook;
 
-const PAGAS = new Set(["PAYMENT_RECEIVED", "PAYMENT_CONFIRMED", "PAYMENT_RECEIVED_IN_CASH"]);
+const EVENTOS_FATURA_SAAS = new Set(["PAYMENT_RECEIVED", "PAYMENT_CONFIRMED"]);
+const EVENTOS_CREDITO_SALDO = new Set(["PAYMENT_RECEIVED"]);
 
 export const Route = createFileRoute("/api/public/webhooks/asaas")({
   server: {
@@ -145,137 +146,146 @@ export const Route = createFileRoute("/api/public/webhooks/asaas")({
         }
 
         try {
-          // 2. Confirmação de fatura SaaS da plataforma (Planos e Assinaturas Já)
-          if (PAGAS.has(evento) && (corpo.payment?.id || corpo.payment?.externalReference)) {
+          // 2. Liquidação da assinatura SaaS. PAYMENT_CONFIRMED pode validar a fatura,
+          // mas não libera funding operacional antes de PAYMENT_RECEIVED.
+          if (EVENTOS_FATURA_SAAS.has(evento) && (corpo.payment?.id || corpo.payment?.externalReference)) {
             const faturaIdRef = corpo.payment.externalReference;
             const parceiroId = corpo.payment.id;
+            if (!parceiroId) {
+              throw new Error("Evento de pagamento SaaS sem identificador da cobrança Asaas.");
+            }
 
             let faturaPlataforma: {
               id: string;
               status: string;
               total: number;
               empresa_id: string;
+              referencia_provedor?: string | null;
             } | null = null;
 
             if (faturaIdRef) {
               const { data: f } = await supabaseAdmin
                 .from("faturas_plataforma")
-                .select("id, status, total, empresa_id")
+                .select("id, status, total, empresa_id, referencia_provedor")
                 .eq("id", faturaIdRef)
                 .maybeSingle();
               if (f) faturaPlataforma = f;
             }
 
-            if (!faturaPlataforma && parceiroId) {
+            if (!faturaPlataforma) {
               const { data: f } = await supabaseAdmin
                 .from("faturas_plataforma")
-                .select("id, status, total, empresa_id")
+                .select("id, status, total, empresa_id, referencia_provedor")
                 .eq("referencia_provedor", parceiroId)
                 .maybeSingle();
               if (f) faturaPlataforma = f;
             }
 
-            if (
-              faturaPlataforma &&
-              faturaPlataforma.status !== "pago" &&
-              faturaPlataforma.status !== "paga"
-            ) {
-              if (!parceiroId) {
-                throw new Error("Evento de pagamento SaaS sem identificador da cobrança Asaas.");
-              }
-
-              // O payload do webhook não é prova suficiente: consulta a cobrança na API oficial.
+            if (faturaPlataforma) {
               const { obterCobrancaAsaas } = await import("@/lib/asaas.server");
               const cobrancaVerificada = await obterCobrancaAsaas(parceiroId);
-              const statusPagos = new Set(["RECEIVED", "CONFIRMED", "RECEIVED_IN_CASH"]);
+              const statusAceitos = new Set(["RECEIVED", "CONFIRMED", "RECEIVED_IN_CASH"]);
               const valorAsaas = Number(cobrancaVerificada.value);
 
               if (
                 cobrancaVerificada.id !== parceiroId ||
                 cobrancaVerificada.externalReference !== faturaPlataforma.id ||
-                !statusPagos.has(cobrancaVerificada.status) ||
+                !statusAceitos.has(cobrancaVerificada.status) ||
                 !Number.isFinite(valorAsaas) ||
                 Math.abs(valorAsaas - Number(faturaPlataforma.total)) >= 0.005
               ) {
-                throw new Error(
-                  "Cobrança Asaas não corresponde à fatura, ao status pago ou ao valor integral esperado.",
-                );
+                throw new Error("Cobrança Asaas não corresponde à fatura, status ou valor integral esperado.");
               }
 
-              let liquidadaRpc = false;
-              try {
-                // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                const { data: resRpc, error: errRpc } = await (supabaseAdmin.rpc as any)(
-                  "liquidar_fatura_plataforma_asaas",
-                  {
-                    _fatura_id: faturaPlataforma.id,
-                    _parceiro_id: parceiroId,
-                    _valor: valorAsaas,
-                  },
-                );
-                if (!errRpc && resRpc && (resRpc as { ok?: boolean }).ok) {
-                  liquidadaRpc = true;
-                }
-              } catch {
-                liquidadaRpc = false;
-              }
-
-              if (!liquidadaRpc) {
-                throw new Error(
-                  "Falha na liquidação atômica da fatura SaaS; o evento será reprocessado.",
-                );
+              const { data: resultadoRpc, error: erroRpc } = await (supabaseAdmin.rpc as any)(
+                "liquidar_fatura_plataforma_asaas",
+                {
+                  _fatura_id: faturaPlataforma.id,
+                  _parceiro_id: parceiroId,
+                  _valor: valorAsaas,
+                },
+              );
+              if (erroRpc || !resultadoRpc?.ok) {
+                throw new Error("Falha na liquidação atômica da fatura SaaS.");
               }
             }
           }
 
-          // 2.1 Confirmação de cobrança de funding/cliente paga (Saldo operacional para repasse Pix)
-          if (PAGAS.has(evento) && corpo.payment?.id) {
-            const { data: cobranca } = await supabaseAdmin
+          // 2.1 Crédito de cobranças operacionais: somente quando o Asaas informa
+          // PAYMENT_RECEIVED (saldo disponibilizado), nunca apenas PAYMENT_CONFIRMED.
+          if (EVENTOS_CREDITO_SALDO.has(evento) && corpo.payment?.id) {
+            const parceiroId = corpo.payment.id;
+            let cobrancaLocal: {
+              id: string;
+              empresa_id: string;
+              valor: number;
+              status: string;
+              descricao: string;
+              parceiro_cobranca_id: string | null;
+            } | null = null;
+
+            const { data: porParceiro } = await supabaseAdmin
               .from("cobrancas")
-              .select("id, empresa_id, valor, status, descricao")
-              .eq("parceiro_cobranca_id", corpo.payment.id)
+              .select("id, empresa_id, valor, status, descricao, parceiro_cobranca_id")
+              .eq("parceiro_cobranca_id", parceiroId)
               .maybeSingle();
+            if (porParceiro) cobrancaLocal = porParceiro;
 
-            if (cobranca && cobranca.status !== "pago") {
-              const { data: taxaPendente } = await supabaseAdmin
-                .from("taxas_plataforma")
-                .select("id, valor")
-                .eq("cobranca_id", cobranca.id)
-                .eq("status", "pendente")
-                .maybeSingle();
-
-              const valorCredito = taxaPendente
-                ? Math.max(0, Number(cobranca.valor) - Number(taxaPendente.valor))
-                : Number(cobranca.valor);
-
-              await supabaseAdmin
+            if (!cobrancaLocal && corpo.payment.externalReference) {
+              const { data: porReferencia } = await supabaseAdmin
                 .from("cobrancas")
-                .update({ status: "pago", pago_em: new Date().toISOString() })
-                .eq("id", cobranca.id);
+                .select("id, empresa_id, valor, status, descricao, parceiro_cobranca_id")
+                .eq("id", corpo.payment.externalReference)
+                .maybeSingle();
+              if (porReferencia) cobrancaLocal = porReferencia;
+            }
 
-              await supabaseAdmin.from("movimentos_saldo").insert({
-                empresa_id: cobranca.empresa_id,
-                tipo: "credito",
-                valor: valorCredito,
-                descricao: `Cobrança paga — ${cobranca.descricao}`,
-                cobranca_id: cobranca.id,
-              });
+            if (cobrancaLocal) {
+              const { obterCobrancaAsaas } = await import("@/lib/asaas.server");
+              const remota = await obterCobrancaAsaas(parceiroId);
+              const valorAsaas = Number(remota.value);
 
-              await supabaseAdmin
-                .from("fundings")
-                .update({
-                  status: "available",
-                  valor_disponivel: valorCredito,
-                  referencia_parceiro: corpo.payment.id,
-                })
-                .eq("cobranca_id", cobranca.id)
-                .eq("status", "pending");
+              if (
+                remota.id !== parceiroId ||
+                remota.externalReference !== cobrancaLocal.id ||
+                !["RECEIVED", "RECEIVED_IN_CASH"].includes(remota.status) ||
+                !Number.isFinite(valorAsaas) ||
+                Math.abs(valorAsaas - Number(cobrancaLocal.valor)) >= 0.005
+              ) {
+                throw new Error("Cobrança operacional não corresponde à referência, status ou valor esperado no Asaas.");
+              }
 
-              if (taxaPendente) {
-                await supabaseAdmin
-                  .from("taxas_plataforma")
-                  .update({ status: "cobrada" })
-                  .eq("id", taxaPendente.id);
+              if (
+                cobrancaLocal.parceiro_cobranca_id &&
+                cobrancaLocal.parceiro_cobranca_id !== parceiroId
+              ) {
+                const { error: erroLog } = await supabaseAdmin.from("logs_auditoria").insert({
+                  empresa_id: cobrancaLocal.empresa_id,
+                  ator_contexto: "sistema",
+                  acao: "cobranca_operacional_duplicada",
+                  recurso_tipo: "cobranca",
+                  recurso_id: cobrancaLocal.id,
+                  resultado: "alerta",
+                  detalhes: {
+                    parceiro_original: cobrancaLocal.parceiro_cobranca_id,
+                    parceiro_duplicado: parceiroId,
+                    valor: valorAsaas,
+                    externalReference: remota.externalReference,
+                  },
+                });
+                if (erroLog) throw erroLog;
+              } else {
+                const { data: resultadoRpc, error: erroRpc } = await (supabaseAdmin.rpc as any)(
+                  "liquidar_cobranca_funding_asaas",
+                  {
+                    _cobranca_id: cobrancaLocal.id,
+                    _parceiro_id: parceiroId,
+                    _valor: valorAsaas,
+                  },
+                );
+                if (erroRpc || !resultadoRpc?.ok) {
+                  throw new Error("Falha na liquidação transacional do crédito operacional.");
+                }
               }
             }
           }
@@ -284,136 +294,119 @@ export const Route = createFileRoute("/api/public/webhooks/asaas")({
             await supabaseAdmin
               .from("cobrancas")
               .update({ status: "vencido" })
-              .eq("parceiro_cobranca_id", corpo.payment.id);
+              .eq("parceiro_cobranca_id", corpo.payment.id)
+              .neq("status", "pago");
 
-            // Atualiza também se for fatura SaaS
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            await (supabaseAdmin.from("faturas_plataforma") as any)
-              .update({ status: "vencida", atualizado_em: new Date().toISOString() })
-              .or(
-                `referencia_provedor.eq.${corpo.payment.id},id.eq.${corpo.payment.externalReference ?? ""}`,
-              );
-          }
-
-          // 3. Transferências Pix aos Freelancers: Sucesso terminal confirmado
-          if (
-            (evento === "TRANSFER_DONE" || evento === "TRANSFER_CONFIRMED") &&
-            corpo.transfer?.externalReference
-          ) {
-            const pagamentoId = corpo.transfer.externalReference;
+            // Atualiza também faturas SaaS ainda não liquidadas.
             await supabaseAdmin
-              .from("pagamentos")
-              .update({
-                status: "executado",
-                executado_em: new Date().toISOString(),
-                txid_parceiro: corpo.transfer.id ?? null,
-                parceiro_transferencia_id: corpo.transfer.id ?? null,
-                erro: null,
-              })
-              .eq("id", pagamentoId)
-              .neq("status", "executado");
+              .from("faturas_plataforma")
+              .update({ status: "vencida", atualizado_em: new Date().toISOString() })
+              .eq("referencia_provedor", corpo.payment.id)
+              .not("status", "in", '("pago","paga")');
           }
 
-          // 4. Transferências Pix aos Freelancers: Falhas, cancelamentos e estornos
-          if (
-            (evento === "TRANSFER_FAILED" ||
-              evento === "TRANSFER_CANCELLED" ||
-              evento === "TRANSFER_REVERSED") &&
-            corpo.transfer?.externalReference
-          ) {
-            const pagamentoId = corpo.transfer.externalReference;
-            const statusFinal = evento === "TRANSFER_REVERSED" ? "estornado" : "falhou";
-            const motivo =
-              corpo.transfer.failReason ||
-              (evento === "TRANSFER_REVERSED"
-                ? "Transferência estornada pelo banco recebedor."
-                : "Transferência cancelada/recusada pelo banco.");
+          // 3. Eventos de transferência: a consulta pontual ao Asaas determina
+          // o estado atual; a ordem dos webhooks não é considerada confiável.
+          const EVENTOS_TRANSFERENCIA = new Set([
+            "TRANSFER_CREATED",
+            "TRANSFER_PENDING",
+            "TRANSFER_IN_BANK_PROCESSING",
+            "TRANSFER_BLOCKED",
+            "TRANSFER_DONE",
+            "TRANSFER_FAILED",
+            "TRANSFER_CANCELLED",
+          ]);
 
-            const descricaoCredito = `Estorno de Pix (${evento === "TRANSFER_REVERSED" ? "estornado" : "recusado"})`;
-            let revertidoViaRpc = false;
-            try {
-              // eslint-disable-next-line @typescript-eslint/no-explicit-any
-              const { data: resRpc, error: errRpc } = await (supabaseAdmin.rpc as any)(
-                "reverter_transferencia_pagamento_pix",
-                {
-                  _pagamento_id: pagamentoId,
-                  _status_final: statusFinal,
-                  _motivo: motivo,
-                  _descricao_credito: descricaoCredito,
-                },
-              );
-              if (
-                !errRpc &&
-                resRpc &&
-                typeof resRpc === "object" &&
-                (resRpc as { ok?: boolean }).ok
-              ) {
-                revertidoViaRpc = true;
-              }
-            } catch {
-              revertidoViaRpc = false;
+          if (EVENTOS_TRANSFERENCIA.has(evento) && corpo.transfer?.externalReference) {
+            const pagamentoId = corpo.transfer.externalReference;
+            const transferenciaId = corpo.transfer.id;
+            if (!transferenciaId) {
+              throw new Error("Evento de transferência sem identificador Asaas.");
             }
 
-            if (!revertidoViaRpc) {
-              const { error: errUpdatePag } = await supabaseAdmin
-                .from("pagamentos")
-                .update({
-                  status: statusFinal,
-                  erro: motivo,
-                })
-                .eq("id", pagamentoId);
+            const { data: pagamento, error: erroPagamento } = await supabaseAdmin
+              .from("pagamentos")
+              .select("id, valor, status, chave_pix_destino, parceiro_transferencia_id, txid_parceiro")
+              .eq("id", pagamentoId)
+              .maybeSingle();
+            if (erroPagamento || !pagamento) {
+              throw new Error("Pagamento relacionado à transferência não foi encontrado.");
+            }
 
-              // Fallback se o enum do banco ainda não suportar 'estornado'
-              if (errUpdatePag && statusFinal === "estornado") {
-                await supabaseAdmin
-                  .from("pagamentos")
-                  .update({
-                    status: "falhou",
-                    erro: `[estornado] ${motivo}`,
-                  })
-                  .eq("id", pagamentoId);
+            const { obterTransferenciaAsaas } = await import("@/lib/asaas.server");
+            const transferencia = await obterTransferenciaAsaas(transferenciaId);
+            const valorTransferencia = Number(transferencia.value);
+
+            if (
+              transferencia.id !== transferenciaId ||
+              transferencia.externalReference !== pagamentoId ||
+              !Number.isFinite(valorTransferencia) ||
+              Math.abs(valorTransferencia - Number(pagamento.valor)) >= 0.005
+            ) {
+              throw new Error("Transferência Asaas não corresponde ao pagamento ou ao valor esperado.");
+            }
+
+            const referenciaAnterior =
+              pagamento.parceiro_transferencia_id ?? pagamento.txid_parceiro ?? null;
+            if (referenciaAnterior && referenciaAnterior !== transferenciaId) {
+              throw new Error("O pagamento já está vinculado a outra transferência Asaas.");
+            }
+
+            const statusTransferencia = String(transferencia.status ?? "").toUpperCase();
+            if (statusTransferencia === "FAILED" || statusTransferencia === "CANCELLED") {
+              const motivo =
+                transferencia.failReason ??
+                (statusTransferencia === "FAILED"
+                  ? "Transferência recusada pelo Asaas."
+                  : "Transferência cancelada no Asaas.");
+              const { data: resultadoRpc, error: erroRpc } = await (supabaseAdmin.rpc as any)(
+                "reverter_transferencia_pagamento_pix_seguro",
+                {
+                  _pagamento_id: pagamentoId,
+                  _transferencia_id: transferenciaId,
+                  _status_final: "falhou",
+                  _motivo: motivo,
+                  _descricao_credito: "Devolução de saldo de Pix recusado ou cancelado",
+                },
+              );
+              if (erroRpc || !resultadoRpc?.ok) {
+                throw new Error("Falha na reversão transacional do pagamento Pix.");
+              }
+            } else {
+              let statusFinal: "executado" | "processando" | "aguardando_aprovacao";
+              if (statusTransferencia === "DONE") {
+                statusFinal = "executado";
+              } else if (statusTransferencia === "AWAITING_CRITICAL_ACTION_AUTHORIZATION") {
+                statusFinal = "aguardando_aprovacao";
+              } else if (
+                ["PENDING", "BANK_PROCESSING", "IN_BANK_PROCESSING", "BLOCKED"].includes(
+                  statusTransferencia,
+                )
+              ) {
+                statusFinal = "processando";
+              } else {
+                throw new Error(`Status de transferência Asaas não reconhecido: ${statusTransferencia}`);
               }
 
-              // Estorna o débito de saldo do Pix se já havia sido debitado e ainda não estornado
-              const { data: pagamento } = await supabaseAdmin
-                .from("pagamentos")
-                .select("id, valor, fechamento_id")
-                .eq("id", pagamentoId)
-                .maybeSingle();
-
-              if (pagamento) {
-                const { data: movimentoDebito } = await supabaseAdmin
-                  .from("movimentos_saldo")
-                  .select("id, empresa_id")
-                  .eq("pagamento_id", pagamento.id)
-                  .eq("tipo", "debito")
-                  .maybeSingle();
-
-                if (movimentoDebito) {
-                  const { data: estornoExistente } = await supabaseAdmin
-                    .from("movimentos_saldo")
-                    .select("id")
-                    .eq("pagamento_id", pagamento.id)
-                    .eq("tipo", "credito")
-                    .maybeSingle();
-
-                  if (!estornoExistente) {
-                    const { error: errEstorno } = await supabaseAdmin
-                      .from("movimentos_saldo")
-                      .insert({
-                        empresa_id: movimentoDebito.empresa_id,
-                        tipo: "credito",
-                        valor: pagamento.valor,
-                        descricao: descricaoCredito,
-                        pagamento_id: pagamento.id,
-                      });
-
-                    if (errEstorno && errEstorno.code !== "23505") {
-                      console.error("[webhook asaas] Erro ao gravar estorno contábil:", errEstorno);
-                      throw errEstorno;
-                    }
-                  }
-                }
+              const { data: resultadoRpc, error: erroRpc } = await (supabaseAdmin.rpc as any)(
+                "efetivar_pagamento_pix_db",
+                {
+                  _pagamento_id: pagamentoId,
+                  _empresa_id: null,
+                  _status_final: statusFinal,
+                  _txid: transferenciaId,
+                  _executado_em: statusFinal === "executado" ? new Date().toISOString() : null,
+                  _erro:
+                    statusFinal === "aguardando_aprovacao"
+                      ? "Aguardando autorização de segurança no Asaas."
+                      : null,
+                  _chave_pix: pagamento.chave_pix_destino,
+                  _descricao_debito: "Pix para freelancer",
+                  _valor: valorTransferencia,
+                },
+              );
+              if (erroRpc || !resultadoRpc?.ok) {
+                throw new Error("Falha na efetivação transacional do pagamento Pix.");
               }
             }
           }

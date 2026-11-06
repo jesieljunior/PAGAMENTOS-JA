@@ -1,4 +1,5 @@
 export type EventoAsaasWebhook = {
+  id?: string;
   event?: string;
   payment?: {
     id?: string;
@@ -20,6 +21,10 @@ function normalizarValor(value: unknown): string {
 }
 
 export function gerarChaveWebhookAsaas(payload: EventoAsaasWebhook): string {
+  // O Asaas mantém o mesmo id quando reentrega o mesmo evento.
+  if (payload.id?.trim()) return `asaas-event:${payload.id.trim()}`;
+
+  // Compatibilidade com payloads antigos sem id: chave determinística legada.
   const evento = payload.event ?? "";
   const payment = payload.payment ?? {};
   const transfer = payload.transfer ?? {};

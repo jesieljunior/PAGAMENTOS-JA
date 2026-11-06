@@ -269,17 +269,29 @@ export function normalizarChavePix(chave: string): {
   return { chave: chaveFormatada, tipo };
 }
 
-export type TransferenciaAsaas = { id: string; status: string; failReason?: string };
+export type TransferenciaAsaas = {
+  id: string;
+  status: string;
+  value?: number;
+  externalReference?: string;
+  failReason?: string;
+};
+
+export async function obterTransferenciaAsaas(transferenciaId: string): Promise<TransferenciaAsaas> {
+  return chamar<TransferenciaAsaas>(`/transfers/${encodeURIComponent(transferenciaId)}`);
+}
 
 export async function transferirPix(dados: {
   valor: number;
   chavePix: string;
   descricao: string;
   referenciaExterna: string;
-  chaveIdempotencia: string;
 }): Promise<TransferenciaAsaas> {
   const { chave: pixAddressKey, tipo: pixAddressKeyType } = normalizarChavePix(dados.chavePix);
-  const transferencia = await chamar<TransferenciaAsaas>("/transfers", {
+  // A API de transferências documenta externalReference, mas não documenta
+  // idempotencyKey como campo do body. A prevenção de duplicidade é local:
+  // lock transacional + não repetir resultados inconclusivos.
+  return chamar<TransferenciaAsaas>("/transfers", {
     method: "POST",
     body: {
       value: dados.valor,
@@ -288,16 +300,6 @@ export async function transferirPix(dados: {
       pixAddressKeyType,
       description: dados.descricao,
       externalReference: dados.referenciaExterna,
-      idempotencyKey: dados.chaveIdempotencia,
     },
   });
-
-  if (transferencia.status === "FAILED" || transferencia.failReason) {
-    throw new AsaasError(
-      `Pix recusado pelo parceiro: ${transferencia.failReason || "Falha na transferência"}`,
-      400,
-    );
-  }
-
-  return transferencia;
 }
