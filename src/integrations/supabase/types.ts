@@ -1445,7 +1445,7 @@ export type Database = {
         Row: {
           acao: string;
           ator_contexto: string;
-          ator_id: string;
+          ator_id: string | null;
           criado_em: string;
           detalhes: Json;
           empresa_id: string | null;
@@ -1457,7 +1457,7 @@ export type Database = {
         Insert: {
           acao: string;
           ator_contexto: string;
-          ator_id: string;
+          ator_id?: string | null;
           criado_em?: string;
           detalhes?: Json;
           empresa_id?: string | null;
@@ -1469,7 +1469,7 @@ export type Database = {
         Update: {
           acao?: string;
           ator_contexto?: string;
-          ator_id?: string;
+          ator_id?: string | null;
           criado_em?: string;
           detalhes?: Json;
           empresa_id?: string | null;
@@ -1548,6 +1548,7 @@ export type Database = {
       mercado_pago_contas: {
         Row: {
           access_token_cifrado: string;
+          client_secret_cifrado: string | null;
           atualizado_em: string;
           criado_em: string;
           empresa_id: string;
@@ -1560,6 +1561,7 @@ export type Database = {
         };
         Insert: {
           access_token_cifrado: string;
+          client_secret_cifrado?: string | null;
           atualizado_em?: string;
           criado_em?: string;
           empresa_id: string;
@@ -1572,6 +1574,7 @@ export type Database = {
         };
         Update: {
           access_token_cifrado?: string;
+          client_secret_cifrado?: string | null;
           atualizado_em?: string;
           criado_em?: string;
           empresa_id?: string;

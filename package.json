@@ -1,6 +1,6 @@
 {
   "name": "pagamentos-ja",
-  "description": "Plataforma B2B para agências de eventos: gestão de escalas, ponto digital antifraude com selfie/geofencing e repasses automáticos via Pix.",
+  "description": "Já — Plataforma B2B de Gestão de Equipes, Ponto Antifraude e Pagamentos Pix",
   "private": true,
   "sideEffects": false,
   "type": "module",
@@ -13,7 +13,8 @@
     "lint": "eslint .",
     "format": "prettier --write .",
     "typecheck": "tsc --noEmit",
-    "scan:secrets": "node scripts/scan-secrets.mjs"
+    "scan:secrets": "node scripts/scan-secrets.mjs",
+    "migrate:mercadopago-credentials": "node scripts/migrate-mercado-pago-credentials.mjs"
   },
   "overrides": {
     "rolldown": "1.2.1"
@@ -98,6 +99,5 @@
     "typescript-eslint": "^8.56.1",
     "vite": "8.1.5",
     "vitest": "^5.0.3"
-  },
-  "description": "Já — Plataforma B2B de Gestão de Equipes, Ponto Antifraude e Pagamentos Pix"
+  }
 }

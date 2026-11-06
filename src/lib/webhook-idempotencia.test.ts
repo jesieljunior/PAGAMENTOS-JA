@@ -14,6 +14,28 @@ describe("Webhook Asaas: Idempotência e Segurança", () => {
     expect(gerarChaveWebhookAsaas(payloadA)).toBe(gerarChaveWebhookAsaas(payloadB));
   });
 
+  it("usa o ID oficial do evento Asaas como chave de idempotência", () => {
+    const primeiraEntrega: EventoAsaasWebhook = {
+      id: "evt_abc123&987",
+      event: "PAYMENT_RECEIVED",
+      payment: { id: "pay_123", externalReference: "cob_456", value: 1500 },
+    };
+    const reentrega: EventoAsaasWebhook = {
+      id: "evt_abc123&987",
+      event: "PAYMENT_RECEIVED",
+      payment: { id: "pay_123", externalReference: "cob_456", value: 1500 },
+    };
+    const outroEvento: EventoAsaasWebhook = {
+      id: "evt_xyz987",
+      event: "PAYMENT_RECEIVED",
+      payment: { id: "pay_123", externalReference: "cob_456", value: 1500 },
+    };
+
+    expect(gerarChaveWebhookAsaas(primeiraEntrega)).toBe("asaas-event:evt_abc123&987");
+    expect(gerarChaveWebhookAsaas(primeiraEntrega)).toBe(gerarChaveWebhookAsaas(reentrega));
+    expect(gerarChaveWebhookAsaas(primeiraEntrega)).not.toBe(gerarChaveWebhookAsaas(outroEvento));
+  });
+
   it("ignora pequenos detalhes de payload quando o evento é o mesmo", () => {
     const payloadA: EventoAsaasWebhook = {
       event: "TRANSFER_FAILED",
@@ -32,6 +54,15 @@ describe("Webhook Asaas: Idempotência e Segurança", () => {
       },
     };
     expect(gerarChaveWebhookAsaas(payloadA)).toBe(gerarChaveWebhookAsaas(payloadB));
+  });
+
+  it("rejeita payload legado sem evento ou referência de recurso", () => {
+    expect(() => gerarChaveWebhookAsaas({ event: "PAYMENT_RECEIVED" })).toThrow(
+      /sem ID de evento ou referência/,
+    );
+    expect(() => gerarChaveWebhookAsaas({ payment: { id: "pay_1" } })).toThrow(
+      /sem ID de evento ou referência/,
+    );
   });
 
   it("gera chaves distintas para pagamentos ou eventos diferentes", () => {
