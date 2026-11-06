@@ -277,7 +277,9 @@ export type TransferenciaAsaas = {
   failReason?: string;
 };
 
-export async function obterTransferenciaAsaas(transferenciaId: string): Promise<TransferenciaAsaas> {
+export async function obterTransferenciaAsaas(
+  transferenciaId: string,
+): Promise<TransferenciaAsaas> {
   return chamar<TransferenciaAsaas>(`/transfers/${encodeURIComponent(transferenciaId)}`);
 }
 

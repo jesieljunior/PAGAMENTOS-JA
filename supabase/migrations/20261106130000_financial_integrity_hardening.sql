@@ -44,9 +44,11 @@ AS $$
 DECLARE
   v_cobranca RECORD;
   v_movimento RECORD;
-  v_taxa RECORD;
+  v_taxa_id uuid;
+  v_taxa_valor numeric;
   v_taxas_count integer;
-  v_funding RECORD;
+  v_funding_id uuid;
+  v_funding_status text;
   v_fundings_count integer;
   v_valor_credito numeric;
 BEGIN
@@ -116,7 +118,7 @@ BEGIN
 
   IF v_taxas_count = 1 THEN
     SELECT id, valor
-    INTO v_taxa
+    INTO v_taxa_id, v_taxa_valor
     FROM public.taxas_plataforma
     WHERE cobranca_id = _cobranca_id AND status = 'pendente'
     FOR UPDATE;
@@ -125,7 +127,7 @@ BEGIN
   IF v_movimento.id IS NOT NULL THEN
     v_valor_credito := v_movimento.valor;
   ELSE
-    v_valor_credito := GREATEST(0, v_cobranca.valor - COALESCE(v_taxa.valor, 0));
+    v_valor_credito := GREATEST(0, v_cobranca.valor - COALESCE(v_taxa_valor, 0));
   END IF;
 
   IF v_valor_credito <= 0 THEN
@@ -143,13 +145,13 @@ BEGIN
 
   IF v_fundings_count = 1 THEN
     SELECT id, status
-    INTO v_funding
+    INTO v_funding_id, v_funding_status
     FROM public.fundings
     WHERE cobranca_id = _cobranca_id
     FOR UPDATE;
 
-    IF v_funding.status NOT IN ('pending', 'available') THEN
-      RAISE EXCEPTION 'Status do funding não permite disponibilização: %', v_funding.status;
+    IF v_funding_status NOT IN ('pending', 'available') THEN
+      RAISE EXCEPTION 'Status do funding não permite disponibilização: %', v_funding_status;
     END IF;
   ELSIF v_cobranca.tipo = 'aporte_agencia' THEN
     RAISE EXCEPTION 'Aporte de agência sem registro de funding associado.';
@@ -174,20 +176,20 @@ BEGIN
       atualizado_em = now()
   WHERE id = _cobranca_id;
 
-  IF v_funding.id IS NOT NULL AND v_funding.status = 'pending' THEN
+  IF v_funding_id IS NOT NULL AND v_funding_status = 'pending' THEN
     UPDATE public.fundings
     SET status = 'available',
         valor_disponivel = v_valor_credito,
         referencia_parceiro = _parceiro_id,
         atualizado_em = now()
-    WHERE id = v_funding.id;
+    WHERE id = v_funding_id;
   END IF;
 
-  IF v_taxa.id IS NOT NULL THEN
+  IF v_taxa_id IS NOT NULL THEN
     UPDATE public.taxas_plataforma
     SET status = 'cobrada',
         atualizado_em = now()
-    WHERE id = v_taxa.id;
+    WHERE id = v_taxa_id;
   END IF;
 
   RETURN jsonb_build_object(

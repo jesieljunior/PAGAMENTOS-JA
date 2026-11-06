@@ -15,6 +15,20 @@ type EventoAsaas = EventoAsaasWebhook;
 const EVENTOS_FATURA_SAAS = new Set(["PAYMENT_RECEIVED", "PAYMENT_CONFIRMED"]);
 const EVENTOS_CREDITO_SALDO = new Set(["PAYMENT_RECEIVED"]);
 
+type ResultadoRpcFinanceira = {
+  ok?: boolean;
+  ja_processada?: boolean;
+  cobranca_duplicada?: boolean;
+};
+
+type ExecutarRpcFinanceira = (
+  nome: string,
+  args: Record<string, unknown>,
+) => Promise<{
+  data: ResultadoRpcFinanceira | null;
+  error: { message: string } | null;
+}>;
+
 export const Route = createFileRoute("/api/public/webhooks/asaas")({
   server: {
     handlers: {
@@ -33,6 +47,9 @@ export const Route = createFileRoute("/api/public/webhooks/asaas")({
         }
 
         const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+        const rpcFinanceira = supabaseAdmin.rpc.bind(
+          supabaseAdmin,
+        ) as unknown as ExecutarRpcFinanceira;
         const evento = corpo.event ?? "";
         const chaveIdempotencia = gerarChaveWebhookAsaas(corpo);
 
@@ -148,7 +165,10 @@ export const Route = createFileRoute("/api/public/webhooks/asaas")({
         try {
           // 2. Liquidação da assinatura SaaS. PAYMENT_CONFIRMED pode validar a fatura,
           // mas não libera funding operacional antes de PAYMENT_RECEIVED.
-          if (EVENTOS_FATURA_SAAS.has(evento) && (corpo.payment?.id || corpo.payment?.externalReference)) {
+          if (
+            EVENTOS_FATURA_SAAS.has(evento) &&
+            (corpo.payment?.id || corpo.payment?.externalReference)
+          ) {
             const faturaIdRef = corpo.payment.externalReference;
             const parceiroId = corpo.payment.id;
             if (!parceiroId) {
@@ -194,10 +214,12 @@ export const Route = createFileRoute("/api/public/webhooks/asaas")({
                 !Number.isFinite(valorAsaas) ||
                 Math.abs(valorAsaas - Number(faturaPlataforma.total)) >= 0.005
               ) {
-                throw new Error("Cobrança Asaas não corresponde à fatura, status ou valor integral esperado.");
+                throw new Error(
+                  "Cobrança Asaas não corresponde à fatura, status ou valor integral esperado.",
+                );
               }
 
-              const { data: resultadoRpc, error: erroRpc } = await (supabaseAdmin.rpc as any)(
+              const { data: resultadoRpc, error: erroRpc } = await rpcFinanceira(
                 "liquidar_fatura_plataforma_asaas",
                 {
                   _fatura_id: faturaPlataforma.id,
@@ -252,7 +274,9 @@ export const Route = createFileRoute("/api/public/webhooks/asaas")({
                 !Number.isFinite(valorAsaas) ||
                 Math.abs(valorAsaas - Number(cobrancaLocal.valor)) >= 0.005
               ) {
-                throw new Error("Cobrança operacional não corresponde à referência, status ou valor esperado no Asaas.");
+                throw new Error(
+                  "Cobrança operacional não corresponde à referência, status ou valor esperado no Asaas.",
+                );
               }
 
               if (
@@ -275,7 +299,7 @@ export const Route = createFileRoute("/api/public/webhooks/asaas")({
                 });
                 if (erroLog) throw erroLog;
               } else {
-                const { data: resultadoRpc, error: erroRpc } = await (supabaseAdmin.rpc as any)(
+                const { data: resultadoRpc, error: erroRpc } = await rpcFinanceira(
                   "liquidar_cobranca_funding_asaas",
                   {
                     _cobranca_id: cobrancaLocal.id,
@@ -326,7 +350,9 @@ export const Route = createFileRoute("/api/public/webhooks/asaas")({
 
             const { data: pagamento, error: erroPagamento } = await supabaseAdmin
               .from("pagamentos")
-              .select("id, valor, status, chave_pix_destino, parceiro_transferencia_id, txid_parceiro")
+              .select(
+                "id, valor, status, chave_pix_destino, parceiro_transferencia_id, txid_parceiro",
+              )
               .eq("id", pagamentoId)
               .maybeSingle();
             if (erroPagamento || !pagamento) {
@@ -343,7 +369,9 @@ export const Route = createFileRoute("/api/public/webhooks/asaas")({
               !Number.isFinite(valorTransferencia) ||
               Math.abs(valorTransferencia - Number(pagamento.valor)) >= 0.005
             ) {
-              throw new Error("Transferência Asaas não corresponde ao pagamento ou ao valor esperado.");
+              throw new Error(
+                "Transferência Asaas não corresponde ao pagamento ou ao valor esperado.",
+              );
             }
 
             const referenciaAnterior =
@@ -359,7 +387,7 @@ export const Route = createFileRoute("/api/public/webhooks/asaas")({
                 (statusTransferencia === "FAILED"
                   ? "Transferência recusada pelo Asaas."
                   : "Transferência cancelada no Asaas.");
-              const { data: resultadoRpc, error: erroRpc } = await (supabaseAdmin.rpc as any)(
+              const { data: resultadoRpc, error: erroRpc } = await rpcFinanceira(
                 "reverter_transferencia_pagamento_pix_seguro",
                 {
                   _pagamento_id: pagamentoId,
@@ -385,10 +413,12 @@ export const Route = createFileRoute("/api/public/webhooks/asaas")({
               ) {
                 statusFinal = "processando";
               } else {
-                throw new Error(`Status de transferência Asaas não reconhecido: ${statusTransferencia}`);
+                throw new Error(
+                  `Status de transferência Asaas não reconhecido: ${statusTransferencia}`,
+                );
               }
 
-              const { data: resultadoRpc, error: erroRpc } = await (supabaseAdmin.rpc as any)(
+              const { data: resultadoRpc, error: erroRpc } = await rpcFinanceira(
                 "efetivar_pagamento_pix_db",
                 {
                   _pagamento_id: pagamentoId,

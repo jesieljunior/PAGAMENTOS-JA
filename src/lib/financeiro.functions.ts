@@ -171,7 +171,14 @@ export const sincronizarCobranca = createServerFn({ method: "POST" })
 
     const { supabaseAdmin, hasAdminKey } = await import("@/integrations/supabase/client.server");
     if (!hasAdminKey()) throw new Error("Configuração administrativa do Supabase ausente.");
-    const { data: resultado, error } = await (supabaseAdmin.rpc as any)(
+    const rpcFinanceiro = supabaseAdmin.rpc.bind(supabaseAdmin) as unknown as (
+      nome: string,
+      args: Record<string, unknown>,
+    ) => Promise<{
+      data: { ok?: boolean; ja_processada?: boolean; cobranca_duplicada?: boolean } | null;
+      error: { message: string } | null;
+    }>;
+    const { data: resultado, error } = await rpcFinanceiro(
       "liquidar_cobranca_funding_asaas",
       {
         _cobranca_id: cobranca.id,
@@ -189,7 +196,6 @@ export const sincronizarCobranca = createServerFn({ method: "POST" })
       cobrancaDuplicada: Boolean(resultado.cobranca_duplicada),
     };
   });
-
 
 /** Envia o Pix ao freelancer contra o saldo da agência. */
 export const executarPagamentoPix = createServerFn({ method: "POST" })

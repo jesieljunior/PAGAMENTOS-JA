@@ -149,7 +149,9 @@ export async function enviarPix(supabase: any, pagamentoId: string, empresaId?: 
         .maybeSingle();
 
       if (errLock || !pagamentoLock) {
-        throw new Error("Pagamento já está sendo processado por outra solicitação ou não está pendente.");
+        throw new Error(
+          "Pagamento já está sendo processado por outra solicitação ou não está pendente.",
+        );
       }
     }
     travaAdquirida = true;
@@ -164,7 +166,9 @@ export async function enviarPix(supabase: any, pagamentoId: string, empresaId?: 
     });
     transferenciaId = respostaCriacao.id || null;
     if (!transferenciaId) {
-      throw new Error("Asaas aceitou a solicitação sem retornar o ID; resultado inconclusivo. Requer reconciliação.");
+      throw new Error(
+        "Asaas aceitou a solicitação sem retornar o ID; resultado inconclusivo. Requer reconciliação.",
+      );
     }
 
     // A resposta do POST não é confirmação final. Consultamos o estado atual uma única vez.
@@ -176,7 +180,9 @@ export async function enviarPix(supabase: any, pagamentoId: string, empresaId?: 
       !Number.isFinite(valorAsaas) ||
       Math.abs(valorAsaas - valor) >= 0.005
     ) {
-      throw new Error("Transferência retornada pelo Asaas não corresponde ao pagamento ou ao valor solicitado.");
+      throw new Error(
+        "Transferência retornada pelo Asaas não corresponde ao pagamento ou ao valor solicitado.",
+      );
     }
 
     const statusAsaas = String(transferencia.status ?? "").toUpperCase();
@@ -196,7 +202,9 @@ export async function enviarPix(supabase: any, pagamentoId: string, empresaId?: 
         },
       );
       if (erroRpc || !resultadoRpc?.ok) {
-        throw new Error("Asaas recusou/cancelou o Pix, mas a atualização local requer reconciliação.");
+        throw new Error(
+          "Asaas recusou/cancelou o Pix, mas a atualização local requer reconciliação.",
+        );
       }
       throw new AsaasError(motivo, 400);
     }
