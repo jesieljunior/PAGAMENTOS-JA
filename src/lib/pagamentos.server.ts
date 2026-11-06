@@ -60,10 +60,7 @@ export async function resolverEmpresaDoPagamento(
  * ainda não retornou um ID de transferência. Depois de receber o ID, qualquer
  * falha de consulta/contabilização é inconclusiva e exige reconciliação.
  */
-export function erroHttpAsaasEhDefinitivo(
-  error: unknown,
-  transferenciaId: string | null,
-): boolean {
+export function erroHttpAsaasEhDefinitivo(error: unknown, transferenciaId: string | null): boolean {
   if (transferenciaId || !(error instanceof Error) || !("status" in error)) {
     return false;
   }
