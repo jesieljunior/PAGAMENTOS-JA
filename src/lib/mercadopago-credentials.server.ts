@@ -40,12 +40,7 @@ export function criptografarCredencialMercadoPago(valor: string): string {
   const conteudo = Buffer.concat([cipher.update(valor, "utf8"), cipher.final()]);
   const tag = cipher.getAuthTag();
 
-  return [
-    PREFIXO_CREDENCIAL.slice(0, -1),
-    iv.toString("base64"),
-    tag.toString("base64"),
-    conteudo.toString("base64"),
-  ].join(":");
+  return `${PREFIXO_CREDENCIAL}${iv.toString("base64")}:${tag.toString("base64")}:${conteudo.toString("base64")}`;
 }
 
 /**

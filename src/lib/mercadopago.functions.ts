@@ -74,11 +74,15 @@ export const salvarCredenciaisMercadoPago = createServerFn({ method: "POST" })
 
     // Armazenamento das credenciais da conta do cliente
     const userIdIdentificador = data.applicationId;
-    const { data: existente } = await supabaseAdmin
+    const { data: existente, error: erroConsultaExistente } = await supabaseAdmin
       .from("mercado_pago_contas")
       .select("id, client_secret_cifrado")
       .eq("empresa_id", empresaId)
       .maybeSingle();
+
+    if (erroConsultaExistente) {
+      throw new Error("Não foi possível consultar as credenciais atuais do Mercado Pago.");
+    }
 
     const accessTokenCifrado = criptografarCredencialMercadoPago(data.accessToken);
     const segredoExistente = existente?.client_secret_cifrado ?? null;
