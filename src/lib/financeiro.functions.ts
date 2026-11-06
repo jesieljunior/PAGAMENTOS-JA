@@ -178,14 +178,11 @@ export const sincronizarCobranca = createServerFn({ method: "POST" })
       data: { ok?: boolean; ja_processada?: boolean; cobranca_duplicada?: boolean } | null;
       error: { message: string } | null;
     }>;
-    const { data: resultado, error } = await rpcFinanceiro(
-      "liquidar_cobranca_funding_asaas",
-      {
-        _cobranca_id: cobranca.id,
-        _parceiro_id: remota.id,
-        _valor: Number(remota.value),
-      },
-    );
+    const { data: resultado, error } = await rpcFinanceiro("liquidar_cobranca_funding_asaas", {
+      _cobranca_id: cobranca.id,
+      _parceiro_id: remota.id,
+      _valor: Number(remota.value),
+    });
     if (error || !resultado?.ok) {
       throw new Error("Não foi possível liquidar a cobrança e o crédito de saldo atomicamente.");
     }

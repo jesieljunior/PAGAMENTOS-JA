@@ -28,9 +28,7 @@ describe("Credenciais Mercado Pago — criptografia", () => {
     const cifrado = criptografarCredencialMercadoPago("segredo-de-teste");
     const partes = cifrado.split(":");
     const conteudo = partes[3] ?? "";
-    const alterado = conteudo.startsWith("A")
-      ? `B${conteudo.slice(1)}`
-      : `A${conteudo.slice(1)}`;
+    const alterado = conteudo.startsWith("A") ? `B${conteudo.slice(1)}` : `A${conteudo.slice(1)}`;
     partes[3] = alterado;
 
     expect(() => descriptografarCredencialMercadoPago(partes.join(":"))).toThrow();
@@ -38,15 +36,11 @@ describe("Credenciais Mercado Pago — criptografia", () => {
 
   it("rejeita valores legados em texto puro", () => {
     process.env["MERCADO_PAGO_CREDENTIALS_ENCRYPTION_KEY"] = CHAVE_TESTE;
-    expect(() => descriptografarCredencialMercadoPago("token-legado")).toThrow(
-      /texto puro/,
-    );
+    expect(() => descriptografarCredencialMercadoPago("token-legado")).toThrow(/texto puro/);
   });
 
   it("exige chave de 32 bytes", () => {
-    process.env["MERCADO_PAGO_CREDENTIALS_ENCRYPTION_KEY"] = Buffer.alloc(16, 3).toString(
-      "base64",
-    );
+    process.env["MERCADO_PAGO_CREDENTIALS_ENCRYPTION_KEY"] = Buffer.alloc(16, 3).toString("base64");
     expect(() => criptografarCredencialMercadoPago("segredo")).toThrow(/32 bytes/);
   });
 });

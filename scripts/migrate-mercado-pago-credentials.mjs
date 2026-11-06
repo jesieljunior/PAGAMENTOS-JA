@@ -52,7 +52,11 @@ const pendentes = (contas ?? []).filter(
 
 console.log(`Contas encontradas: ${contas?.length ?? 0}`);
 console.log(`Contas com credenciais legadas para migrar: ${pendentes.length}`);
-console.log(aplicar ? "Modo APPLY: alterações serão gravadas." : "Modo DRY-RUN: nenhuma alteração será gravada.");
+console.log(
+  aplicar
+    ? "Modo APPLY: alterações serão gravadas."
+    : "Modo DRY-RUN: nenhuma alteração será gravada.",
+);
 
 for (const conta of pendentes) {
   const atualizacao = {};
