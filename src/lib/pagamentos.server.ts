@@ -298,7 +298,12 @@ export async function enviarPix(supabase: any, pagamentoId: string, empresaId?: 
         } else if (solicitacaoEnviada) {
           // Não transforma resultado remoto incerto em falha definitiva.
           // A coluna de ID é preenchida quando o Asaas chegou a responder.
-          const atualizacao: Record<string, unknown> = {
+          const atualizacao: {
+            erro: string;
+            atualizado_em: string;
+            txid_parceiro?: string;
+            parceiro_transferencia_id?: string;
+          } = {
             erro: transferenciaId
               ? `Reconciliação necessária: transferência ${transferenciaId} existe no Asaas. ${mensagem}`
               : `Reconciliação necessária: resultado do POST ao Asaas inconclusivo. ${mensagem}`,
