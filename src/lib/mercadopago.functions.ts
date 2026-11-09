@@ -4,10 +4,6 @@ import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { requireCapability, requireOrganizationContext } from "@/lib/autorizacao.server";
 import { verificarStatusAssinaturaEmpresa } from "@/lib/mercadopago.server";
-import {
-  criptografarCredencialMercadoPago,
-  credencialMercadoPagoEstaCriptografada,
-} from "@/lib/mercadopago-credentials.server";
 
 const salvarCredenciaisSchema = z.object({
   applicationId: z.string().trim().min(3, "Application ID obrigatório"),
@@ -74,25 +70,11 @@ export const salvarCredenciaisMercadoPago = createServerFn({ method: "POST" })
 
     // Armazenamento das credenciais da conta do cliente
     const userIdIdentificador = data.applicationId;
-    const { data: existente, error: erroConsultaExistente } = await supabaseAdmin
+    const { data: existente } = await supabaseAdmin
       .from("mercado_pago_contas")
-      .select("id, client_secret_cifrado")
+      .select("id")
       .eq("empresa_id", empresaId)
       .maybeSingle();
-
-    if (erroConsultaExistente) {
-      throw new Error("Não foi possível consultar as credenciais atuais do Mercado Pago.");
-    }
-
-    const accessTokenCifrado = criptografarCredencialMercadoPago(data.accessToken);
-    const segredoExistente = existente?.client_secret_cifrado ?? null;
-    const clientSecretCifrado = data.clientSecret?.trim()
-      ? criptografarCredencialMercadoPago(data.clientSecret)
-      : segredoExistente
-        ? credencialMercadoPagoEstaCriptografada(segredoExistente)
-          ? segredoExistente
-          : criptografarCredencialMercadoPago(segredoExistente)
-        : null;
 
     let operacao;
     if (existente) {
@@ -100,8 +82,7 @@ export const salvarCredenciaisMercadoPago = createServerFn({ method: "POST" })
         .from("mercado_pago_contas")
         .update({
           mercado_pago_user_id: userIdIdentificador,
-          access_token_cifrado: accessTokenCifrado,
-          client_secret_cifrado: clientSecretCifrado,
+          access_token_cifrado: data.accessToken,
           escopos: JSON.stringify({
             ambiente: data.ambiente,
             publicKey: data.publicKey ?? null,
@@ -115,8 +96,7 @@ export const salvarCredenciaisMercadoPago = createServerFn({ method: "POST" })
       operacao = await supabaseAdmin.from("mercado_pago_contas").insert({
         empresa_id: empresaId,
         mercado_pago_user_id: userIdIdentificador,
-        access_token_cifrado: accessTokenCifrado,
-        client_secret_cifrado: clientSecretCifrado,
+        access_token_cifrado: data.accessToken,
         escopos: JSON.stringify({
           ambiente: data.ambiente,
           publicKey: data.publicKey ?? null,
