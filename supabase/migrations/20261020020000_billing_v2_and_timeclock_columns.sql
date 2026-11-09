@@ -505,7 +505,7 @@ RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, 
 DECLARE p public.planos; v_qtd int;
 BEGIN
   IF NEW.tipo_vinculo <> 'clt' OR NOT NEW.ativo THEN RETURN NEW; END IF;
-  IF TG_OP = 'UPDATE' AND OLD.tipo_vinculo = 'clt' AND OLD.ativo THEN RETURN NEW; END IF;
+  IF TG_OP = 'UPDATE' AND OLD.empresa_id = NEW.empresa_id AND OLD.tipo_vinculo = 'clt' AND OLD.ativo THEN RETURN NEW; END IF;
   p := public.plano_da_empresa(NEW.empresa_id);
   IF p.limite_clt IS NULL THEN RETURN NEW; END IF;
   PERFORM pg_advisory_xact_lock(hashtext('clt:' || NEW.empresa_id::text));
