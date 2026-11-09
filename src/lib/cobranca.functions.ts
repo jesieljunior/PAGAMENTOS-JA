@@ -576,7 +576,7 @@ export const selecionarPlanoEmpresa = createServerFn({ method: "POST" })
         plano_nome: plano.nome,
         ciclo_inicio: agoraIso,
         ciclo_fim: cicloFimIso,
-        vencimento: vencimentoIso,
+        vencimento: vencimentoIso.split("T")[0]!,
         mensalidade: plano.mensalidade,
         participacoes_incluidas: plano.participacoes_incluidas,
         participacoes_usadas: 0,
