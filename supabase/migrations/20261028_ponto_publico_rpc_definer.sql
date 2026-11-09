@@ -529,7 +529,7 @@ $$;
 
 REVOKE ALL ON FUNCTION public.pode_enviar_selfie_ponto(text, text) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION public.pode_enviar_selfie_ponto(text, text)
-  TO anon, authenticated, service_role;
+  TO authenticated, service_role;
 
 UPDATE storage.buckets
 SET file_size_limit = 5242880,
