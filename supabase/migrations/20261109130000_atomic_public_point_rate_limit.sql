@@ -51,12 +51,16 @@ BEGIN
     AND t.criado_em >= now() - interval '10 minutes';
 
   -- Limite individual por CPF para conter enumeração/brute force.
-  SELECT count(*)::integer
-  INTO v_total_cpf
-  FROM public.tentativas_ponto_publico t
-  WHERE t.token_hash = _token_hash
-    AND t.cpf_hash = _cpf_hash
-    AND t.criado_em >= now() - interval '10 minutes';
+  IF _cpf_hash IS NOT NULL THEN
+    SELECT count(*)::integer
+    INTO v_total_cpf
+    FROM public.tentativas_ponto_publico t
+    WHERE t.token_hash = _token_hash
+      AND t.cpf_hash = _cpf_hash
+      AND t.criado_em >= now() - interval '10 minutes';
+  ELSE
+    v_total_cpf := 0;
+  END IF;
 
   IF v_total_token >= 10000 OR v_total_ip >= 1200 OR v_total_cpf >= 10 THEN
     RETURN QUERY SELECT false, NULL::uuid;
