@@ -208,7 +208,7 @@ export async function obterCobrancaAsaas(cobrancaId: string) {
   return chamar<{
     id: string;
     status: string;
-    billingType?: string;
+    billingType: string;
     value?: number;
     externalReference?: string;
     paymentDate?: string;
