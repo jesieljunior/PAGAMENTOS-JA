@@ -12,7 +12,7 @@ DO $$ BEGIN
 END;
 $$;
 
-DO $
+DO $$
 BEGIN
   IF EXISTS (
     SELECT 1
@@ -23,7 +23,7 @@ BEGIN
       'Há logs sem ator humano fora do contexto sistema. Reconcilie a auditoria antes de validar a constraint.';
   END IF;
 END;
-$;
+$$;
 
 ALTER TABLE public.logs_auditoria
   VALIDATE CONSTRAINT logs_auditoria_ator_sistema_check;
