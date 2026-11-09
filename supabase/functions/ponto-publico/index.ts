@@ -365,52 +365,46 @@ async function registrar(supabase: AdminClient, input: Record<string, unknown>) 
     throw new RequestError(`O próximo registro deve ser ${esperado.replaceAll("_", " ")}.`);
   }
 
-  const agora = new Date();
-  const foraHorario = Boolean(
-    (evento.data_inicio && agora < new Date(evento.data_inicio)) ||
-      (evento.data_fim && agora > new Date(evento.data_fim)),
-  );
-  const retencaoDias = Math.min(
-    config?.selfie_retencao_dias ?? 90,
-    plano?.retencao_evidencias_dias ?? 365,
-  );
-  const { data: ponto, error: erroPonto } = await supabase
-    .from("pontos")
-    .insert({
-      escala_id: escala.id,
-      tipo: tipoValido,
-      metodo: fotoBase64 ? "selfie" : "qrcode",
-      registrado_em: agora.toISOString(),
-      foto_url: fotoUrl,
-      gps_lat: lat,
-      gps_lng: lng,
-      status: "pendente",
-      fora_horario: foraHorario,
-      selfie_consentimento_aceito_em: fotoBase64 ? agora.toISOString() : null,
-      selfie_expira_em: fotoBase64 || lat !== null || lng !== null
-        ? new Date(agora.getTime() + retencaoDias * 24 * 60 * 60_000).toISOString()
-        : null,
-    })
-    .select("id")
-    .single();
-  failIfError(erroPonto, "Não foi possível registrar a marcação");
-  if (!ponto) throw new RequestError("Não foi possível confirmar a gravação da marcação.", 500);
-
-  const { error: erroAuditoria } = await supabase.from("auditoria_ponto_publico").insert({
-    empresa_id: evento.empresa_id,
-    escala_id: escala.id,
-    ponto_id: ponto.id,
-    acao: "ponto_registrado",
-    resultado: "sucesso",
-    detalhes: {
-      tipo: tipoValido,
-      fora_horario: foraHorario,
-      com_selfie: Boolean(fotoBase64),
+  const { data: resultadoRpc, error: erroRpc } = await (supabase.rpc as any)(
+    "registrar_ponto_publico",
+    {
+      _token: token,
+      _cpf: cpf,
+      _escala_id: escala.id,
+      _tipo: tipoValido,
+      _foto_url: fotoUrl,
+      _gps_lat: lat,
+      _gps_lng: lng,
+      _consentiu_selfie: input.consentiuSelfie === true,
     },
-  });
-  failIfError(erroAuditoria, "A marcação foi registrada, mas a auditoria falhou");
+  );
 
-  return { ok: true as const, foraHorario };
+  if (erroRpc) {
+    if (fotoUrl) {
+      const { error: erroRemocao } = await supabase.storage
+        .from("selfies-ponto")
+        .remove([fotoUrl]);
+      if (erroRemocao) {
+        console.error("[ponto-publico] Não foi possível remover selfie órfã:", erroRemocao);
+      }
+    }
+    throw new RequestError(erroRpc.message || "Não foi possível registrar a marcação.", 400);
+  }
+
+  const resultado = resultadoRpc as { ok?: boolean; foraHorario?: boolean } | null;
+  if (!resultado?.ok) {
+    if (fotoUrl) {
+      const { error: erroRemocao } = await supabase.storage
+        .from("selfies-ponto")
+        .remove([fotoUrl]);
+      if (erroRemocao) {
+        console.error("[ponto-publico] Não foi possível remover selfie órfã:", erroRemocao);
+      }
+    }
+    throw new RequestError("O banco não confirmou o registro da marcação.", 500);
+  }
+
+  return { ok: true as const, foraHorario: Boolean(resultado.foraHorario) };
 }
 
 Deno.serve(async (request: Request) => {
