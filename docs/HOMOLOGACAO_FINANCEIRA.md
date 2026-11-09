@@ -74,6 +74,7 @@ Para completar o schema de ponto e faturamento e depois aplicar as proteções f
 7. `20261105130000_harden_saas_invoice_settlement.sql` — restringe a liquidação de faturas a `service_role`.
 8. `20261106130000_financial_integrity_hardening.sql` — instala as proteções transacionais finais para funding, Pix de saída, estornos e faturas SaaS.
 9. `20261109120000_seed_billing_v2_plans.sql` — insere o catálogo inicial de planos apenas quando o ID/código ainda não existir; não sobrescreve preços ou limites já configurados.
+10. `20261109130000_atomic_public_point_rate_limit.sql` — instala o rate limit atômico de ponto público, com bloqueio por token/IP e execução exclusiva por `service_role`.
 
 A migration final não configura nem altera credenciais do Mercado Pago. A aplicação está sendo homologada com Asaas.
 
@@ -94,7 +95,7 @@ Não execute o conjunto de migrations como se o banco estivesse vazio. A migrati
 
 A seleção de plano pago agora reutiliza uma fatura pendente já existente e consulta o Asaas pela `externalReference`; se a busca não retornar exatamente uma cobrança correspondente ou retornar mais de uma, a função falha sem criar outra cobrança. Isso reduz o risco de duplicidade, mas pode exigir reconciliação manual quando o provedor ainda não indexou a cobrança.
 
-A Edge Function aplica rate limit e valida empresa/assinatura/evento/QR/colaborador; a gravação final chama a RPC SQL com `service_role`, que grava ponto e auditoria na mesma transação. O fallback direto de gravação com `service_role` foi removido. As RPCs públicas de QR Code agora verificam empresa ativa, assinatura ativa/trial dentro do prazo, status não terminal do evento e expiração do QR também no registro da batida. O registro rejeita colaboradores inativos/recusados e marca como fora do horário tanto batidas antecipadas quanto posteriores ao evento.
+A Edge Function aplica rate limit atômico por token/IP (20 tentativas em 10 minutos) e valida empresa/assinatura/evento/QR/colaborador; a gravação final chama a RPC SQL com `service_role`, que grava ponto e auditoria na mesma transação. O fallback direto de gravação com `service_role` foi removido. As RPCs SQL de QR Code são restritas a `service_role` e validam empresa ativa, assinatura ativa/trial dentro do prazo, status não terminal do evento e expiração do QR também no registro da batida. O registro rejeita colaboradores inativos/recusados e marca como fora do horário tanto batidas antecipadas quanto posteriores ao evento.
 
 A sincronização de participações mantém a regra operacional: remoção/substituição antes do início do evento desativa a participação; depois do início, a participação confirmada é preservada para não apagar uso histórico. Evento cancelado desativa as participações. O acesso a recursos também valida `trial_ate` no banco: assinaturas `trial`/`em_trial` sem prazo ou com prazo expirado não recebem novos recursos nem abrem novos ciclos. A seleção repetida do plano gratuito preserva a data de expiração existente e não concede mais sete dias. Empresas sem assinatura também não recebem recursos nem abrem ciclos até que exista uma assinatura explícita.
 
