@@ -665,6 +665,7 @@ DECLARE p public.planos;
 BEGIN
  PERFORM public.validar_acesso_cobranca(_empresa_id);
  IF NOT EXISTS (SELECT 1 FROM public.empresas WHERE id=_empresa_id AND ativa) THEN RETURN false; END IF;
+ IF NOT EXISTS (SELECT 1 FROM public.assinaturas WHERE empresa_id=_empresa_id) THEN RETURN false; END IF;
  IF EXISTS (SELECT 1 FROM public.assinaturas WHERE empresa_id=_empresa_id AND status NOT IN ('ativa','trial','em_trial')) THEN RETURN false; END IF;
  IF EXISTS (
    SELECT 1 FROM public.assinaturas
@@ -704,7 +705,10 @@ BEGIN
  IF v_id IS NOT NULL THEN RETURN v_id; END IF;
  p:=public.plano_da_empresa(_empresa_id);
  SELECT * INTO a FROM public.assinaturas WHERE empresa_id=_empresa_id;
- IF a.id IS NOT NULL AND a.status NOT IN ('ativa','trial','em_trial','pendente','aguardando_pagamento') THEN
+ IF a.id IS NULL THEN
+   RETURN NULL;
+ END IF;
+ IF a.status NOT IN ('ativa','trial','em_trial','pendente','aguardando_pagamento') THEN
    RETURN NULL;
  END IF;
  IF a.status IN ('trial','em_trial') AND (a.trial_ate IS NULL OR a.trial_ate <= now()) THEN
