@@ -3,6 +3,7 @@ import { z } from "zod";
 
 import type { Database, Tables } from "@/integrations/supabase/types";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
+import { isRecebimentoManualEmDinheiro } from "@/lib/asaas-payment-policy";
 import { requireOrganizationContext } from "./autorizacao.server";
 import { calcularFatura } from "./cobranca-v2";
 import { PLANOS_CATALOGO } from "./planos-catalogo";
@@ -917,13 +918,15 @@ export const confirmarPagamentoFaturaPlano = createServerFn({ method: "POST" })
     // Conciliação manual deve ser uma operação administrativa separada, com evidência e trilha próprias.
     try {
       const { buscarCobrancaPorReferencia, obterCobrancaAsaas } = await import("./asaas.server");
-      const statusPagosAsaas = new Set(["RECEIVED", "CONFIRMED", "RECEIVED_IN_CASH"]);
+      const statusPagosAsaas = new Set(["RECEIVED", "CONFIRMED"]);
 
       if (fatura.referencia_provedor) {
         try {
           const cobranca = await obterCobrancaAsaas(fatura.referencia_provedor);
           if (
             cobranca &&
+            Boolean(cobranca.billingType) &&
+            !isRecebimentoManualEmDinheiro(cobranca.billingType) &&
             statusPagosAsaas.has(cobranca.status) &&
             cobranca.externalReference === data.faturaId &&
             Number.isFinite(Number(cobranca.value)) &&
@@ -943,6 +946,8 @@ export const confirmarPagamentoFaturaPlano = createServerFn({ method: "POST" })
         const cobranca = resultado.data?.[0];
         if (
           cobranca &&
+          Boolean(cobranca.billingType) &&
+          !isRecebimentoManualEmDinheiro(cobranca.billingType) &&
           statusPagosAsaas.has(cobranca.status) &&
           cobranca.externalReference === data.faturaId &&
           Number.isFinite(Number(cobranca.value)) &&
