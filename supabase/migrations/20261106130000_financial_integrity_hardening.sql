@@ -203,11 +203,16 @@ BEGIN
   END IF;
 
   IF v_fundings_count = 1 THEN
-    SELECT id, status, valor_total, valor_disponivel, valor_reservado, valor_utilizado, valor_devolvido
+    SELECT id, status, valor_total, valor_disponivel, valor_reservado, valor_utilizado, valor_devolvido, referencia_parceiro
     INTO v_funding
     FROM public.fundings
     WHERE cobranca_id = _cobranca_id
     FOR UPDATE;
+
+    IF v_funding.referencia_parceiro IS NOT NULL
+       AND v_funding.referencia_parceiro <> _parceiro_id THEN
+      RAISE EXCEPTION 'Funding já está vinculado a outra cobrança Asaas (%).', _cobranca_id;
+    END IF;
 
     IF round(v_funding.valor_total, 2) <> round(v_cobranca.valor, 2) THEN
       RAISE EXCEPTION 'Valor total do funding diverge do valor bruto da cobrança (%).', _cobranca_id;
@@ -254,14 +259,20 @@ BEGIN
       atualizado_em = now()
   WHERE id = _cobranca_id;
 
-  IF v_fundings_count = 1 AND (
-    v_movimento.id IS NULL OR v_funding.status = 'pending'
-  ) THEN
-    -- Não restaura saldo de funding que já tenha reservas, consumo ou estorno.
+  IF v_fundings_count = 1 THEN
+    -- Atualiza o saldo somente na primeira liquidação ou na recuperação de
+    -- um estado legado pendente; em reentregas posteriores preserva reservas,
+    -- consumo e estornos, mas completa a referência do provedor se ausente.
     UPDATE public.fundings
-    SET status = 'available',
-        valor_disponivel = v_valor_credito,
-        referencia_parceiro = _parceiro_id,
+    SET status = CASE
+          WHEN v_movimento.id IS NULL OR v_funding.status = 'pending' THEN 'available'
+          ELSE status
+        END,
+        valor_disponivel = CASE
+          WHEN v_movimento.id IS NULL OR v_funding.status = 'pending' THEN v_valor_credito
+          ELSE valor_disponivel
+        END,
+        referencia_parceiro = COALESCE(referencia_parceiro, _parceiro_id),
         atualizado_em = now()
     WHERE id = v_funding.id;
   END IF;
