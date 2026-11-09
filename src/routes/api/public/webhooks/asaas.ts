@@ -319,12 +319,22 @@ export const Route = createFileRoute("/api/public/webhooks/asaas")({
           }
 
           if (evento === "PAYMENT_OVERDUE" && corpo.payment?.id) {
-            const { error: erroCobrancaVencida } = await supabaseAdmin
+            const atualizacaoCobrancaVencida = { status: "vencido" };
+            const { error: erroCobrancaPorParceiro } = await supabaseAdmin
               .from("cobrancas")
-              .update({ status: "vencido" })
+              .update(atualizacaoCobrancaVencida)
               .eq("parceiro_cobranca_id", corpo.payment.id)
               .in("status", ["rascunho", "aguardando_pagamento", "vencido"]);
-            if (erroCobrancaVencida) throw erroCobrancaVencida;
+            if (erroCobrancaPorParceiro) throw erroCobrancaPorParceiro;
+
+            if (corpo.payment.externalReference) {
+              const { error: erroCobrancaPorReferencia } = await supabaseAdmin
+                .from("cobrancas")
+                .update(atualizacaoCobrancaVencida)
+                .eq("id", corpo.payment.externalReference)
+                .in("status", ["rascunho", "aguardando_pagamento", "vencido"]);
+              if (erroCobrancaPorReferencia) throw erroCobrancaPorReferencia;
+            }
 
             // Atualiza também faturas SaaS ainda não liquidadas.
             const atualizacaoFatura = {
