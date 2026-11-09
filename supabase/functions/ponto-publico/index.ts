@@ -87,8 +87,7 @@ function validarValidadeQr(evento: {
     ? new Date(evento.qr_code_expira_em).getTime()
     : evento.data_fim
       ? new Date(evento.data_fim).getTime() + 12 * 60 * 60_000
-      : new Date(evento.qr_code_gerado_em ?? evento.criado_em ?? "").getTime() +
-        12 * 60 * 60_000;
+      : new Date(evento.qr_code_gerado_em ?? evento.criado_em ?? "").getTime() + 12 * 60 * 60_000;
 
   if (!Number.isFinite(dataBase) || agora > dataBase) {
     throw new RequestError(
@@ -118,7 +117,10 @@ async function hash(value: string): Promise<string> {
     await chaveHashPromise,
     new TextEncoder().encode(value),
   );
-  return Array.from(new Uint8Array(assinatura), (byte) => byte.toString(16).padStart(2, "0")).join("");
+  return Array.from(
+    new Uint8Array(assinatura),
+    (byte) => byte.toString(16).padStart(2, "0"),
+  ).join("");
 }
 
 async function comLimiteDeTentativas<T>(
@@ -180,7 +182,9 @@ async function comLimiteDeTentativas<T>(
 async function localizarEscala(supabase: AdminClient, token: string, cpf: string) {
   const { data: evento, error: erroEvento } = await supabase
     .from("eventos")
-    .select("id, empresa_id, status, data_inicio, data_fim, qr_code_expira_em, qr_code_gerado_em, criado_em")
+    .select(
+      "id, empresa_id, status, data_inicio, data_fim, qr_code_expira_em, qr_code_gerado_em, criado_em",
+    )
     .eq("qr_code_token", token)
     .maybeSingle();
   failIfError(erroEvento, "Não foi possível localizar o evento do QR Code");
@@ -227,7 +231,9 @@ async function localizarEscala(supabase: AdminClient, token: string, cpf: string
 async function obterContexto(supabase: AdminClient, token: string) {
   const { data: evento, error: erroEvento } = await supabase
     .from("eventos")
-    .select("id, nome, local, status, empresa_id, data_inicio, data_fim, qr_code_expira_em, qr_code_gerado_em, criado_em")
+    .select(
+      "id, nome, local, status, empresa_id, data_inicio, data_fim, qr_code_expira_em, qr_code_gerado_em, criado_em",
+    )
     .eq("qr_code_token", token)
     .maybeSingle();
   failIfError(erroEvento, "Não foi possível consultar o QR Code");
