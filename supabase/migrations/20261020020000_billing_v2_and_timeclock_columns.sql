@@ -43,6 +43,7 @@ GRANT SELECT ON public.auditoria_ponto_publico TO authenticated;
 GRANT ALL ON public.auditoria_ponto_publico TO service_role;
 ALTER TABLE public.auditoria_ponto_publico ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS "auditoria ponto leitura supervisao" ON public.auditoria_ponto_publico;
+DROP POLICY IF EXISTS "auditoria ponto leitura supervisao" ON public.auditoria_ponto_publico;
 CREATE POLICY "auditoria ponto leitura supervisao"
 ON public.auditoria_ponto_publico FOR SELECT TO authenticated
 USING (
@@ -67,6 +68,7 @@ BEGIN
 END;
 $$;
 
+DROP TRIGGER IF EXISTS tg_pontos_validar_decisao ON public.pontos;
 CREATE TRIGGER tg_pontos_validar_decisao
 BEFORE INSERT OR UPDATE OF status, motivo_recusa ON public.pontos
 FOR EACH ROW EXECUTE FUNCTION public.validar_ponto_decidido();
@@ -84,11 +86,13 @@ BEGIN
 END;
 $$;
 
+DROP TRIGGER IF EXISTS tg_eventos_expiracao_qr ON public.eventos;
 CREATE TRIGGER tg_eventos_expiracao_qr
 BEFORE UPDATE OF data_fim ON public.eventos
 FOR EACH ROW EXECUTE FUNCTION public.atualizar_expiracao_qr_evento();
 
 DROP POLICY IF EXISTS "selfies_select_empresa" ON storage.objects;
+DROP POLICY IF EXISTS "selfies_select_supervisao" ON storage.objects;
 CREATE POLICY "selfies_select_supervisao"
 ON storage.objects FOR SELECT TO authenticated
 USING (
@@ -135,6 +139,7 @@ BEGIN
 END;
 $$;
 
+DROP TRIGGER IF EXISTS tg_pontos_validar_sequencia ON public.pontos;
 CREATE TRIGGER tg_pontos_validar_sequencia
 BEFORE INSERT ON public.pontos
 FOR EACH ROW EXECUTE FUNCTION public.validar_sequencia_novo_ponto();
@@ -161,7 +166,7 @@ COMMENT ON COLUMN public.assinaturas.taxa_fixa_override IS 'DEPRECATED: cobranç
 COMMENT ON TABLE public.taxas_plataforma IS 'DEPRECATED para novos lançamentos: histórico do modelo percentual/Asaas';
 
 -- Participações operacionais deduplicadas (pessoa x evento)
-CREATE TABLE public.participacoes_operacionais (
+CREATE TABLE IF NOT EXISTS public.participacoes_operacionais (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   empresa_id uuid NOT NULL REFERENCES public.empresas(id) ON DELETE CASCADE,
   evento_id uuid NOT NULL REFERENCES public.eventos(id) ON DELETE CASCADE,
@@ -173,15 +178,16 @@ CREATE TABLE public.participacoes_operacionais (
   atualizado_em timestamptz NOT NULL DEFAULT now(),
   UNIQUE (evento_id, freelancer_id)
 );
-CREATE INDEX idx_participacoes_empresa_data ON public.participacoes_operacionais(empresa_id, data_evento) WHERE ativa;
+CREATE INDEX IF NOT EXISTS idx_participacoes_empresa_data ON public.participacoes_operacionais(empresa_id, data_evento) WHERE ativa;
 GRANT SELECT ON public.participacoes_operacionais TO authenticated;
 GRANT ALL ON public.participacoes_operacionais TO service_role;
 ALTER TABLE public.participacoes_operacionais ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS participacoes_leitura ON public.participacoes_operacionais;
 CREATE POLICY participacoes_leitura ON public.participacoes_operacionais FOR SELECT TO authenticated
   USING (empresa_id = public.empresa_atual() OR public.eh_equipe_plataforma());
 
 -- Faturas SaaS
-CREATE TABLE public.faturas_plataforma (
+CREATE TABLE IF NOT EXISTS public.faturas_plataforma (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   empresa_id uuid NOT NULL REFERENCES public.empresas(id) ON DELETE CASCADE,
   assinatura_id uuid REFERENCES public.assinaturas(id),
@@ -210,12 +216,14 @@ CREATE TABLE public.faturas_plataforma (
 GRANT SELECT ON public.faturas_plataforma TO authenticated;
 GRANT ALL ON public.faturas_plataforma TO service_role;
 ALTER TABLE public.faturas_plataforma ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS faturas_leitura ON public.faturas_plataforma;
 CREATE POLICY faturas_leitura ON public.faturas_plataforma FOR SELECT TO authenticated
   USING (empresa_id = public.empresa_atual() OR public.eh_equipe_plataforma());
+DROP TRIGGER IF EXISTS tg_faturas_atualizado_em ON public.faturas_plataforma;
 CREATE TRIGGER tg_faturas_atualizado_em BEFORE UPDATE ON public.faturas_plataforma FOR EACH ROW EXECUTE FUNCTION public.tg_atualizado_em();
 
 -- Histórico de assinatura (conversão Free -> pago) e de planos
-CREATE TABLE public.assinaturas_historico (
+CREATE TABLE IF NOT EXISTS public.assinaturas_historico (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   empresa_id uuid NOT NULL REFERENCES public.empresas(id) ON DELETE CASCADE,
   plano_anterior_id uuid REFERENCES public.planos(id),
@@ -226,10 +234,11 @@ CREATE TABLE public.assinaturas_historico (
 GRANT SELECT ON public.assinaturas_historico TO authenticated;
 GRANT ALL ON public.assinaturas_historico TO service_role;
 ALTER TABLE public.assinaturas_historico ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS assinaturas_historico_leitura ON public.assinaturas_historico;
 CREATE POLICY assinaturas_historico_leitura ON public.assinaturas_historico FOR SELECT TO authenticated
   USING (public.eh_equipe_plataforma());
 
-CREATE TABLE public.planos_historico (
+CREATE TABLE IF NOT EXISTS public.planos_historico (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   plano_id uuid NOT NULL REFERENCES public.planos(id) ON DELETE CASCADE,
   alterado_por uuid,
@@ -240,11 +249,12 @@ CREATE TABLE public.planos_historico (
 GRANT SELECT ON public.planos_historico TO authenticated;
 GRANT ALL ON public.planos_historico TO service_role;
 ALTER TABLE public.planos_historico ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS planos_historico_leitura ON public.planos_historico;
 CREATE POLICY planos_historico_leitura ON public.planos_historico FOR SELECT TO authenticated
   USING (public.eh_equipe_plataforma());
 
 -- Taxas do meio de pagamento (custo repassável, nunca receita)
-CREATE TABLE public.taxas_meio_pagamento (
+CREATE TABLE IF NOT EXISTS public.taxas_meio_pagamento (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   metodo text NOT NULL UNIQUE,
   rotulo text NOT NULL,
@@ -256,13 +266,16 @@ GRANT SELECT ON public.taxas_meio_pagamento TO authenticated;
 GRANT SELECT, INSERT, UPDATE ON public.taxas_meio_pagamento TO authenticated;
 GRANT ALL ON public.taxas_meio_pagamento TO service_role;
 ALTER TABLE public.taxas_meio_pagamento ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS taxas_meio_leitura ON public.taxas_meio_pagamento;
 CREATE POLICY taxas_meio_leitura ON public.taxas_meio_pagamento FOR SELECT TO authenticated USING (true);
+DROP POLICY IF EXISTS taxas_meio_escrita ON public.taxas_meio_pagamento;
 CREATE POLICY taxas_meio_escrita ON public.taxas_meio_pagamento FOR ALL TO authenticated
   USING (public.tem_papel_plataforma(auth.uid(),'admin_master'))
   WITH CHECK (public.tem_papel_plataforma(auth.uid(),'admin_master'));
+DROP TRIGGER IF EXISTS tg_taxas_meio_atualizado_em ON public.taxas_meio_pagamento;
 CREATE TRIGGER tg_taxas_meio_atualizado_em BEFORE UPDATE ON public.taxas_meio_pagamento FOR EACH ROW EXECUTE FUNCTION public.tg_atualizado_em();
 
-CREATE TABLE public.custos_meio_pagamento (
+CREATE TABLE IF NOT EXISTS public.custos_meio_pagamento (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   empresa_id uuid NOT NULL REFERENCES public.empresas(id) ON DELETE CASCADE,
   fatura_id uuid REFERENCES public.faturas_plataforma(id),
@@ -277,6 +290,7 @@ CREATE TABLE public.custos_meio_pagamento (
 GRANT SELECT ON public.custos_meio_pagamento TO authenticated;
 GRANT ALL ON public.custos_meio_pagamento TO service_role;
 ALTER TABLE public.custos_meio_pagamento ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS custos_meio_leitura ON public.custos_meio_pagamento;
 CREATE POLICY custos_meio_leitura ON public.custos_meio_pagamento FOR SELECT TO authenticated
   USING (empresa_id = public.empresa_atual() OR public.eh_equipe_plataforma());
 
@@ -399,6 +413,7 @@ BEGIN
   END IF;
   RETURN NULL;
 END; $$;
+DROP TRIGGER IF EXISTS tg_escalas_participacao ON public.escalas;
 CREATE TRIGGER tg_escalas_participacao AFTER INSERT OR UPDATE OR DELETE ON public.escalas
   FOR EACH ROW EXECUTE FUNCTION public.tg_escalas_sincronizar_participacao();
 
@@ -415,6 +430,7 @@ BEGIN
   END IF;
   RETURN NULL;
 END; $$;
+DROP TRIGGER IF EXISTS tg_eventos_participacoes ON public.eventos;
 CREATE TRIGGER tg_eventos_participacoes AFTER UPDATE ON public.eventos
   FOR EACH ROW EXECUTE FUNCTION public.tg_eventos_sincronizar_participacoes();
 
@@ -432,6 +448,7 @@ BEGIN
   END IF;
   RETURN NEW;
 END; $$;
+DROP TRIGGER IF EXISTS tg_eventos_limite ON public.eventos;
 CREATE TRIGGER tg_eventos_limite BEFORE INSERT ON public.eventos
   FOR EACH ROW EXECUTE FUNCTION public.tg_eventos_limite_plano();
 
@@ -459,6 +476,7 @@ BEGIN
   END IF;
   RETURN NEW;
 END; $$;
+DROP TRIGGER IF EXISTS tg_escalas_limite ON public.escalas;
 CREATE TRIGGER tg_escalas_limite BEFORE INSERT OR UPDATE ON public.escalas
   FOR EACH ROW EXECUTE FUNCTION public.tg_escalas_limite_plano();
 
@@ -478,6 +496,7 @@ BEGIN
   END IF;
   RETURN NEW;
 END; $$;
+DROP TRIGGER IF EXISTS tg_freelancers_limite_clt ON public.freelancers;
 CREATE TRIGGER tg_freelancers_limite_clt BEFORE INSERT OR UPDATE ON public.freelancers
   FOR EACH ROW EXECUTE FUNCTION public.tg_freelancers_limite_clt();
 
@@ -498,6 +517,7 @@ BEGIN
   END IF;
   RETURN NEW;
 END; $$;
+DROP TRIGGER IF EXISTS tg_user_roles_limite_supervisores ON public.user_roles;
 CREATE TRIGGER tg_user_roles_limite_supervisores BEFORE INSERT ON public.user_roles
   FOR EACH ROW EXECUTE FUNCTION public.tg_user_roles_limite_supervisores();
 
@@ -510,6 +530,7 @@ BEGIN
   END IF;
   RETURN NEW;
 END; $$;
+DROP TRIGGER IF EXISTS tg_fechamentos_recurso ON public.fechamentos;
 CREATE TRIGGER tg_fechamentos_recurso BEFORE INSERT ON public.fechamentos
   FOR EACH ROW EXECUTE FUNCTION public.tg_fechamentos_recurso();
 
@@ -527,6 +548,7 @@ BEGIN
   END IF;
   RETURN NEW;
 END; $$;
+DROP TRIGGER IF EXISTS tg_pagamentos_recurso ON public.pagamentos;
 CREATE TRIGGER tg_pagamentos_recurso BEFORE INSERT OR UPDATE ON public.pagamentos
   FOR EACH ROW EXECUTE FUNCTION public.tg_pagamentos_recurso();
 
@@ -540,6 +562,7 @@ BEGIN
   END IF;
   RETURN NULL;
 END; $$;
+DROP TRIGGER IF EXISTS tg_assinaturas_historico ON public.assinaturas;
 CREATE TRIGGER tg_assinaturas_historico AFTER INSERT OR UPDATE ON public.assinaturas
   FOR EACH ROW EXECUTE FUNCTION public.tg_assinaturas_historico();
 
@@ -550,6 +573,7 @@ BEGIN
   VALUES (NEW.id, auth.uid(), to_jsonb(OLD), to_jsonb(NEW));
   RETURN NULL;
 END; $$;
+DROP TRIGGER IF EXISTS tg_planos_historico ON public.planos;
 CREATE TRIGGER tg_planos_historico AFTER UPDATE ON public.planos
   FOR EACH ROW EXECUTE FUNCTION public.tg_planos_historico();
 
@@ -634,12 +658,13 @@ ALTER POLICY faturas_leitura ON public.faturas_plataforma USING(empresa_id=publi
 ALTER POLICY custos_meio_leitura ON public.custos_meio_pagamento USING(empresa_id=public.empresa_atual() OR public.tem_papel_plataforma(auth.uid(),'admin_master'));
 ALTER POLICY assinaturas_historico_leitura ON public.assinaturas_historico USING(public.tem_papel_plataforma(auth.uid(),'admin_master'));
 ALTER POLICY planos_historico_leitura ON public.planos_historico USING(public.tem_papel_plataforma(auth.uid(),'admin_master'));
-CREATE TABLE public.ciclos_cobranca (
+CREATE TABLE IF NOT EXISTS public.ciclos_cobranca (
  id uuid PRIMARY KEY DEFAULT gen_random_uuid(), empresa_id uuid NOT NULL REFERENCES public.empresas(id), assinatura_id uuid REFERENCES public.assinaturas(id), plano_id uuid REFERENCES public.planos(id), plano_nome text NOT NULL, inicio timestamptz NOT NULL, fim timestamptz NOT NULL, mensalidade numeric NOT NULL, participacoes_incluidas integer NOT NULL, valor_excedente numeric NOT NULL, desconto_tipo text, desconto_valor numeric NOT NULL DEFAULT 0, trial_ate timestamptz, criado_em timestamptz NOT NULL DEFAULT now(), UNIQUE(empresa_id,inicio)
 );
 GRANT SELECT ON public.ciclos_cobranca TO authenticated;
 GRANT ALL ON public.ciclos_cobranca TO service_role;
 ALTER TABLE public.ciclos_cobranca ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS ciclos_leitura ON public.ciclos_cobranca;
 CREATE POLICY ciclos_leitura ON public.ciclos_cobranca FOR SELECT TO authenticated USING(empresa_id=public.empresa_atual() OR public.tem_papel_plataforma(auth.uid(),'admin_master'));
 CREATE OR REPLACE FUNCTION public.abrir_ciclo_cobranca(_empresa_id uuid)
 RETURNS uuid LANGUAGE plpgsql SECURITY DEFINER SET search_path=public AS $$
@@ -660,7 +685,8 @@ END; $$;
 REVOKE ALL ON FUNCTION public.abrir_ciclo_cobranca(uuid) FROM PUBLIC,anon,authenticated;
 GRANT EXECUTE ON FUNCTION public.abrir_ciclo_cobranca(uuid) TO service_role;
 INSERT INTO public.ciclos_cobranca(empresa_id,assinatura_id,plano_id,plano_nome,inicio,fim,mensalidade,participacoes_incluidas,valor_excedente,trial_ate)
-SELECT a.empresa_id,a.id,p.id,p.nome,c.inicio,c.fim,coalesce(a.mensalidade_override,p.mensalidade),p.participacoes_incluidas,p.valor_excedente,a.trial_ate FROM public.assinaturas a JOIN public.planos p ON p.id=a.plano_id CROSS JOIN LATERAL public.ciclo_da_empresa(a.empresa_id,now()) c;
+SELECT a.empresa_id,a.id,p.id,p.nome,c.inicio,c.fim,coalesce(a.mensalidade_override,p.mensalidade),p.participacoes_incluidas,p.valor_excedente,a.trial_ate FROM public.assinaturas a JOIN public.planos p ON p.id=a.plano_id CROSS JOIN LATERAL public.ciclo_da_empresa(a.empresa_id,now()) c
+ON CONFLICT (empresa_id, inicio) DO NOTHING;
 CREATE OR REPLACE FUNCTION public.fechar_fatura_ciclo(_empresa_id uuid,_ref timestamptz)
 RETURNS uuid LANGUAGE plpgsql SECURITY DEFINER SET search_path=public AS $$
 DECLARE c public.ciclos_cobranca; v_id uuid; v_usadas int; v_exc int; v_bruto numeric; v_desc numeric:=0;
@@ -682,6 +708,7 @@ END; $$;
 CREATE OR REPLACE FUNCTION public.tg_fechamentos_recurso()
 RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER SET search_path=public AS $$ BEGIN
  IF NOT public.recurso_habilitado(public.empresa_da_escala(NEW.escala_id),'fechamento') THEN RAISE EXCEPTION 'RECURSO_PLANO: faça upgrade para liberar fechamento financeiro'; END IF; RETURN NEW; END; $$;
+DROP TRIGGER IF EXISTS tg_fechamentos_recurso_update ON public.fechamentos;
 CREATE TRIGGER tg_fechamentos_recurso_update BEFORE UPDATE ON public.fechamentos FOR EACH ROW EXECUTE FUNCTION public.tg_fechamentos_recurso();
 CREATE OR REPLACE FUNCTION public.tg_pagamentos_recurso()
 RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER SET search_path=public AS $$ DECLARE v_empresa uuid; BEGIN
@@ -696,11 +723,13 @@ RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER SET search_path=public AS $$ D
  SELECT * INTO c FROM public.ciclo_da_empresa(NEW.empresa_id,NEW.data_inicio);
  SELECT count(*) INTO v_qtd FROM public.eventos WHERE empresa_id=NEW.empresa_id AND status<>'cancelado' AND data_inicio>=c.inicio AND data_inicio<c.fim AND id<>NEW.id;
  IF v_qtd>=p.limite_eventos_ciclo THEN RAISE EXCEPTION 'LIMITE_PLANO: limite de eventos por ciclo atingido; faça upgrade'; END IF; RETURN NEW; END; $$;
+DROP TRIGGER IF EXISTS tg_eventos_limite_update ON public.eventos;
 CREATE TRIGGER tg_eventos_limite_update BEFORE UPDATE OF data_inicio,status ON public.eventos FOR EACH ROW EXECUTE FUNCTION public.tg_eventos_limite_plano();
 CREATE OR REPLACE FUNCTION public.tg_planos_validar_v2()
 RETURNS trigger LANGUAGE plpgsql SET search_path=public AS $$ BEGIN
  IF NEW.mensalidade<0 OR NEW.valor_excedente<0 OR NEW.participacoes_incluidas<0 OR NEW.limite_clt<0 OR NEW.limite_eventos_ciclo<0 OR NEW.limite_pessoas_evento<0 OR NEW.limite_supervisores<0 OR NEW.retencao_evidencias_dias<1 THEN RAISE EXCEPTION 'Valores e limites de plano inválidos'; END IF;
  NEW.percentual:=0; NEW.taxa_fixa_pix:=0; RETURN NEW; END; $$;
+DROP TRIGGER IF EXISTS tg_planos_validar_v2 ON public.planos;
 CREATE TRIGGER tg_planos_validar_v2 BEFORE INSERT OR UPDATE ON public.planos FOR EACH ROW EXECUTE FUNCTION public.tg_planos_validar_v2();
 DO $$ DECLARE f record; BEGIN FOR f IN SELECT p.oid::regprocedure AS signature FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname='public' AND p.proname IN ('tg_escalas_limite_plano','tg_eventos_limite_plano','tg_freelancers_limite_clt','tg_user_roles_limite_supervisores','tg_escalas_sincronizar_participacao','tg_eventos_sincronizar_participacoes','tg_fechamentos_recurso','tg_pagamentos_recurso','tg_assinaturas_historico','tg_planos_historico','sincronizar_participacao') LOOP EXECUTE format('REVOKE ALL ON FUNCTION %s FROM PUBLIC,anon,authenticated',f.signature); END LOOP; END $$;CREATE OR REPLACE FUNCTION public.ciclo_da_empresa(_empresa_id uuid,_ref timestamptz DEFAULT now()) RETURNS TABLE(inicio timestamptz,fim timestamptz) LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path=public AS $$ DECLARE a timestamptz; n int; i timestamptz; f timestamptz; BEGIN
  SELECT coalesce(s.inicio_ciclo,e.criado_em) INTO a FROM public.empresas e LEFT JOIN public.assinaturas s ON s.empresa_id=e.id WHERE e.id=_empresa_id;
@@ -724,6 +753,7 @@ CREATE OR REPLACE FUNCTION public.tg_ponto_evidencias_plano() RETURNS trigger LA
  IF NEW.foto_url IS NOT NULL OR NEW.gps_lat IS NOT NULL OR NEW.gps_lng IS NOT NULL THEN NEW.evidencia_expira_em:=NEW.registrado_em+make_interval(days=>dias); END IF;
  IF NEW.foto_url IS NOT NULL THEN NEW.selfie_expira_em:=NEW.evidencia_expira_em; END IF; RETURN NEW;
 END; $$;
+DROP TRIGGER IF EXISTS tg_ponto_evidencias_plano ON public.pontos;
 CREATE TRIGGER tg_ponto_evidencias_plano BEFORE INSERT ON public.pontos FOR EACH ROW EXECUTE FUNCTION public.tg_ponto_evidencias_plano();
 CREATE OR REPLACE FUNCTION public.validar_sequencia_novo_ponto() RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER SET search_path=public AS $$ DECLARE tipos tipo_ponto[]; esperado tipo_ponto; p public.planos; BEGIN
  IF NEW.status='recusado' THEN RETURN NEW; END IF;
@@ -739,15 +769,21 @@ CREATE OR REPLACE FUNCTION public.validar_sequencia_novo_ponto() RETURNS trigger
  IF NEW.tipo<>esperado THEN RAISE EXCEPTION 'Próximo registro esperado: %',esperado; END IF; RETURN NEW;
 END; $$;
 CREATE OR REPLACE FUNCTION public.tg_bloquear_taxa_legada() RETURNS trigger LANGUAGE plpgsql SET search_path=public AS $$ BEGIN RAISE EXCEPTION 'Cobrança legada desativada: use faturas SaaS V2'; END; $$;
+DROP TRIGGER IF EXISTS tg_bloquear_taxa_legada ON public.taxas_plataforma;
 CREATE TRIGGER tg_bloquear_taxa_legada BEFORE INSERT ON public.taxas_plataforma FOR EACH ROW EXECUTE FUNCTION public.tg_bloquear_taxa_legada();
 CREATE OR REPLACE FUNCTION public.tg_financeiro_recurso() RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER SET search_path=public AS $$ BEGIN
  IF NOT public.recurso_habilitado(NEW.empresa_id,'financeiro') THEN RAISE EXCEPTION 'RECURSO_PLANO: faça upgrade para liberar financeiro'; END IF; RETURN NEW;
 END; $$;
+DROP TRIGGER IF EXISTS tg_cobrancas_plano ON public.cobrancas;
 CREATE TRIGGER tg_cobrancas_plano BEFORE INSERT ON public.cobrancas FOR EACH ROW EXECUTE FUNCTION public.tg_financeiro_recurso();
+DROP TRIGGER IF EXISTS tg_fundings_plano ON public.fundings;
 CREATE TRIGGER tg_fundings_plano BEFORE INSERT ON public.fundings FOR EACH ROW EXECUTE FUNCTION public.tg_financeiro_recurso();
+DROP TRIGGER IF EXISTS tg_lotes_plano ON public.lotes_pagamento;
 CREATE TRIGGER tg_lotes_plano BEFORE INSERT ON public.lotes_pagamento FOR EACH ROW EXECUTE FUNCTION public.tg_financeiro_recurso();
 DROP POLICY IF EXISTS bloqueio_leitura_fechamento_free ON public.fechamentos;
+DROP POLICY IF EXISTS bloqueio_leitura_fechamento_free ON public.fechamentos;
 CREATE POLICY bloqueio_leitura_fechamento_free ON public.fechamentos AS RESTRICTIVE FOR SELECT TO authenticated USING(public.tem_papel_plataforma(auth.uid(),'admin_master') OR public.recurso_habilitado(public.empresa_da_escala(escala_id),'fechamento'));
+DROP POLICY IF EXISTS bloqueio_leitura_pagamentos_free ON public.pagamentos;
 DROP POLICY IF EXISTS bloqueio_leitura_pagamentos_free ON public.pagamentos;
 CREATE POLICY bloqueio_leitura_pagamentos_free ON public.pagamentos AS RESTRICTIVE FOR SELECT TO authenticated USING(public.tem_papel_plataforma(auth.uid(),'admin_master') OR public.recurso_habilitado(public.empresa_do_fechamento(fechamento_id),'financeiro'));
 CREATE OR REPLACE FUNCTION public.processar_cobranca_v2() RETURNS void LANGUAGE plpgsql SECURITY DEFINER SET search_path=public AS $$ DECLARE c record; BEGIN
