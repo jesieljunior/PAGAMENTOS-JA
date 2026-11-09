@@ -102,8 +102,7 @@ DECLARE
   v_taxa_valor numeric;
   v_taxa_status text;
   v_taxas_count integer;
-  v_funding_id uuid;
-  v_funding_status text;
+  v_funding RECORD;
   v_fundings_count integer;
   v_valor_credito numeric;
 BEGIN
@@ -156,7 +155,7 @@ BEGIN
     RAISE EXCEPTION 'Status da cobrança não permite liquidação: %', v_cobranca.status;
   END IF;
 
-  SELECT id, valor
+  SELECT id, valor, empresa_id
   INTO v_movimento
   FROM public.movimentos_saldo
   WHERE cobranca_id = _cobranca_id AND tipo = 'credito'
@@ -179,14 +178,19 @@ BEGIN
     FOR UPDATE;
   END IF;
 
-  IF v_movimento.id IS NOT NULL THEN
-    v_valor_credito := v_movimento.valor;
-  ELSE
-    v_valor_credito := GREATEST(0, v_cobranca.valor - COALESCE(v_taxa_valor, 0));
-  END IF;
+  -- O valor esperado é sempre recalculado a partir da cobrança e da taxa.
+  -- Um crédito histórico só é aceito se empresa e valor coincidirem.
+  v_valor_credito := GREATEST(0, v_cobranca.valor - COALESCE(v_taxa_valor, 0));
 
   IF v_valor_credito <= 0 THEN
     RAISE EXCEPTION 'Valor líquido de crédito inválido para a cobrança (%).', _cobranca_id;
+  END IF;
+
+  IF v_movimento.id IS NOT NULL AND (
+    v_movimento.empresa_id IS DISTINCT FROM v_cobranca.empresa_id
+    OR round(v_movimento.valor, 2) <> round(v_valor_credito, 2)
+  ) THEN
+    RAISE EXCEPTION 'Crédito histórico diverge da empresa ou do valor líquido esperado para a cobrança (%).', _cobranca_id;
   END IF;
 
   SELECT count(*)
@@ -199,14 +203,33 @@ BEGIN
   END IF;
 
   IF v_fundings_count = 1 THEN
-    SELECT id, status
-    INTO v_funding_id, v_funding_status
+    SELECT id, status, valor_total, valor_disponivel, valor_reservado, valor_utilizado, valor_devolvido
+    INTO v_funding
     FROM public.fundings
     WHERE cobranca_id = _cobranca_id
     FOR UPDATE;
 
-    IF v_funding_status NOT IN ('pending', 'available') THEN
-      RAISE EXCEPTION 'Status do funding não permite disponibilização: %', v_funding_status;
+    IF round(v_funding.valor_total, 2) <> round(v_cobranca.valor, 2) THEN
+      RAISE EXCEPTION 'Valor total do funding diverge do valor bruto da cobrança (%).', _cobranca_id;
+    END IF;
+
+    IF v_movimento.id IS NULL THEN
+      -- Sem lançamento de crédito, só um funding ainda pendente pode ser disponibilizado.
+      IF v_funding.status <> 'pending'
+         OR v_funding.valor_reservado <> 0
+         OR v_funding.valor_utilizado <> 0
+         OR v_funding.valor_devolvido <> 0 THEN
+        RAISE EXCEPTION 'Funding sem crédito contábil está em estado incompatível; reconciliação necessária (%).', _cobranca_id;
+      END IF;
+    ELSIF v_funding.status = 'pending' THEN
+      -- Recupera apenas o estado legado parcialmente gravado, sem reservas ou consumo.
+      IF v_funding.valor_reservado <> 0
+         OR v_funding.valor_utilizado <> 0
+         OR v_funding.valor_devolvido <> 0 THEN
+        RAISE EXCEPTION 'Funding pendente com valores reservados/utilizados; reconciliação necessária (%).', _cobranca_id;
+      END IF;
+    ELSIF v_funding.status NOT IN ('available', 'partially_reserved', 'reserved', 'consumed', 'refund_pending', 'refunded') THEN
+      RAISE EXCEPTION 'Status do funding não permite conciliação: %', v_funding.status;
     END IF;
   ELSIF v_cobranca.tipo = 'aporte_agencia' THEN
     RAISE EXCEPTION 'Aporte de agência sem registro de funding associado.';
@@ -231,13 +254,16 @@ BEGIN
       atualizado_em = now()
   WHERE id = _cobranca_id;
 
-  IF v_funding_id IS NOT NULL THEN
+  IF v_fundings_count = 1 AND (
+    v_movimento.id IS NULL OR v_funding.status = 'pending'
+  ) THEN
+    -- Não restaura saldo de funding que já tenha reservas, consumo ou estorno.
     UPDATE public.fundings
     SET status = 'available',
         valor_disponivel = v_valor_credito,
         referencia_parceiro = _parceiro_id,
         atualizado_em = now()
-    WHERE id = v_funding_id;
+    WHERE id = v_funding.id;
   END IF;
 
   IF v_taxa_id IS NOT NULL AND v_taxa_status = 'pendente' THEN
