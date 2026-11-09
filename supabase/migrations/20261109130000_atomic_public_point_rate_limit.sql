@@ -80,6 +80,9 @@ CREATE INDEX IF NOT EXISTS tentativas_ponto_token_cpf_idx
   ON public.tentativas_ponto_publico (token_hash, cpf_hash, criado_em DESC)
   WHERE cpf_hash IS NOT NULL;
 
+CREATE INDEX IF NOT EXISTS tentativas_ponto_criado_em_idx
+  ON public.tentativas_ponto_publico (criado_em);
+
 REVOKE ALL ON FUNCTION public.iniciar_tentativa_ponto_publico(text, text, text, text)
   FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.iniciar_tentativa_ponto_publico(text, text, text, text)
