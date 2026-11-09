@@ -809,7 +809,7 @@ RETURNS trigger
 LANGUAGE plpgsql
 SECURITY DEFINER
 SET search_path = pg_catalog, public, pg_temp
-AS $
+AS $$
 DECLARE
   p public.planos;
   dias integer;
@@ -842,7 +842,7 @@ BEGIN
 
   RETURN NEW;
 END;
-$;
+$$;
 
 DROP TRIGGER IF EXISTS tg_ponto_evidencias_plano ON public.pontos;
 CREATE TRIGGER tg_ponto_evidencias_plano
