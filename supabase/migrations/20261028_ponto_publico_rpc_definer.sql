@@ -487,72 +487,13 @@ INSERT INTO storage.buckets (id, name, public)
 VALUES ('selfies-ponto', 'selfies-ponto', false)
 ON CONFLICT (id) DO NOTHING;
 
--- O upload público só aceita imagens no caminho esperado e vinculadas a uma escala
--- de uma empresa ativa com assinatura válida.
-CREATE OR REPLACE FUNCTION public.pode_enviar_selfie_ponto(
-  _escala_id text,
-  _empresa_id text DEFAULT NULL
-)
-RETURNS boolean
-LANGUAGE sql
-STABLE
-SECURITY DEFINER
-SET search_path = pg_catalog, public
-AS $$
-  SELECT EXISTS (
-    SELECT 1
-    FROM public.escalas s
-    JOIN public.equipes eq ON eq.id = s.equipe_id
-    JOIN public.eventos e ON e.id = eq.evento_id
-    JOIN public.empresas em ON em.id = e.empresa_id
-    JOIN public.assinaturas a ON a.empresa_id = e.empresa_id
-    WHERE s.id::text = _escala_id
-      AND (_empresa_id IS NULL OR e.empresa_id::text = _empresa_id)
-      AND s.status NOT IN ('recusado', 'substituido')
-      AND e.status NOT IN ('fechamento', 'pagamento', 'concluido', 'arquivado', 'cancelado')
-      AND (
-        (e.qr_code_expira_em IS NOT NULL
-          AND (
-            now() <= e.qr_code_expira_em
-            OR now() - COALESCE(e.qr_code_gerado_em, e.criado_em) <= interval '12 hours'
-          ))
-        OR (e.qr_code_expira_em IS NULL
-          AND (e.data_fim IS NULL OR now() <= e.data_fim + interval '12 hours'))
-      )
-      AND em.ativa
-      AND (
-        a.status = 'ativa'
-        OR (a.status IN ('trial', 'em_trial') AND a.trial_ate > now())
-      )
-  );
-$$;
-
-REVOKE ALL ON FUNCTION public.pode_enviar_selfie_ponto(text, text) FROM PUBLIC;
-GRANT EXECUTE ON FUNCTION public.pode_enviar_selfie_ponto(text, text)
-  TO authenticated, service_role;
+-- O upload de evidências é realizado exclusivamente pela Edge Function com service_role.
+-- Não conceder INSERT direto em storage.objects a anon/authenticated: isso permitiria
+-- contornar a validação do token QR feita no fluxo público.
+DROP POLICY IF EXISTS "selfies_insert_publico" ON storage.objects;
+DROP FUNCTION IF EXISTS public.pode_enviar_selfie_ponto(text, text);
 
 UPDATE storage.buckets
 SET file_size_limit = 5242880,
     allowed_mime_types = ARRAY['image/jpeg', 'image/png', 'image/webp']
 WHERE id = 'selfies-ponto';
-
-DROP POLICY IF EXISTS "selfies_insert_publico" ON storage.objects;
-CREATE POLICY "selfies_insert_publico" ON storage.objects
-  FOR INSERT TO authenticated
-  WITH CHECK (
-    bucket_id = 'selfies-ponto'
-    AND array_length(storage.foldername(name), 1) = 2
-    AND length((storage.foldername(name))[1]) = 36
-    AND (storage.foldername(name))[1] = public.empresa_atual()::text
-    AND length((storage.foldername(name))[2]) = 36
-    AND length(split_part(name, '/', 3)) IN (40, 41)
-    AND left(split_part(name, '/', 3), 36) ~* '^[0-9a-f-]{36}'
-    AND (
-      lower(right(split_part(name, '/', 3), 4)) IN ('.jpg', '.png', '.webp')
-      OR lower(right(split_part(name, '/', 3), 5)) = '.jpeg'
-    )
-    AND public.pode_enviar_selfie_ponto(
-      (storage.foldername(name))[2],
-      public.empresa_atual()::text
-    )
-  );
