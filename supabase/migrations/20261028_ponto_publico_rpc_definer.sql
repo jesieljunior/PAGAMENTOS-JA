@@ -541,13 +541,18 @@ CREATE POLICY "selfies_insert_publico" ON storage.objects
   FOR INSERT TO authenticated
   WITH CHECK (
     bucket_id = 'selfies-ponto'
-    AND name ~* '^[0-9a-f-]{36}/[0-9a-f-]{36}/[0-9a-f-]{8}-[0-9a-f-]{4}-[0-9a-f-]{4}-[0-9a-f-]{4}-[0-9a-f-]{12}\.(jpg|png|webp)
-
-
+    AND array_length(storage.foldername(name), 1) = 2
+    AND length((storage.foldername(name))[1]) = 36
     AND (storage.foldername(name))[1] = public.empresa_atual()::text
+    AND length((storage.foldername(name))[2]) = 36
+    AND length(split_part(name, '/', 3)) IN (40, 41)
+    AND left(split_part(name, '/', 3), 36) ~* '^[0-9a-f-]{36}'
+    AND (
+      lower(right(split_part(name, '/', 3), 4)) IN ('.jpg', '.png', '.webp')
+      OR lower(right(split_part(name, '/', 3), 5)) = '.jpeg'
+    )
     AND public.pode_enviar_selfie_ponto(
       (storage.foldername(name))[2],
       public.empresa_atual()::text
     )
   );
-
