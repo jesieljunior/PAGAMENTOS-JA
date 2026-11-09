@@ -87,6 +87,7 @@ Para completar o schema de ponto e faturamento e depois aplicar as proteções f
 9. `20261109120000_seed_billing_v2_plans.sql` — insere o catálogo inicial de planos apenas quando o ID/código ainda não existir; não sobrescreve preços ou limites já configurados.
 10. `20261109130000_atomic_public_point_rate_limit.sql` — instala o rate limit atômico de ponto público, com bloqueio por token/IP e execução exclusiva por `service_role`.
 11. `20261109140000_revoke_legacy_public_point_context.sql` — revoga a execução pública da RPC antiga de contexto QR, mantendo acesso apenas ao backend.
+12. `20261109150000_preserve_billing_usage_history.sql` — impede que exclusões de eventos/freelancers apaguem participações faturáveis e que exclusões de planos apaguem snapshots de auditoria.
 
 A migration final não configura nem altera credenciais do Mercado Pago. A aplicação está sendo homologada com Asaas.
 
