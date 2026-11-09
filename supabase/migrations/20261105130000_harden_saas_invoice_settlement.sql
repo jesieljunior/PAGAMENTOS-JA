@@ -8,7 +8,7 @@ CREATE OR REPLACE FUNCTION public.liquidar_fatura_plataforma_asaas(
 RETURNS jsonb
 LANGUAGE plpgsql
 SECURITY DEFINER
-SET search_path = public
+SET search_path = pg_catalog, public, pg_temp
 AS $$
 DECLARE
   v_fatura RECORD;
