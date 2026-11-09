@@ -666,6 +666,14 @@ BEGIN
  PERFORM public.validar_acesso_cobranca(_empresa_id);
  IF NOT EXISTS (SELECT 1 FROM public.empresas WHERE id=_empresa_id AND ativa) THEN RETURN false; END IF;
  IF EXISTS (SELECT 1 FROM public.assinaturas WHERE empresa_id=_empresa_id AND status NOT IN ('ativa','trial','em_trial')) THEN RETURN false; END IF;
+ IF EXISTS (
+   SELECT 1 FROM public.assinaturas
+   WHERE empresa_id=_empresa_id
+     AND status IN ('trial','em_trial')
+     AND (trial_ate IS NULL OR trial_ate <= now())
+ ) THEN
+   RETURN false;
+ END IF;
  p := public.plano_da_empresa(_empresa_id);
  RETURN coalesce(p.recursos->>_recurso,'false')='true';
 END; $$;
@@ -697,6 +705,9 @@ BEGIN
  p:=public.plano_da_empresa(_empresa_id);
  SELECT * INTO a FROM public.assinaturas WHERE empresa_id=_empresa_id;
  IF a.id IS NOT NULL AND a.status NOT IN ('ativa','trial','em_trial','pendente','aguardando_pagamento') THEN
+   RETURN NULL;
+ END IF;
+ IF a.status IN ('trial','em_trial') AND (a.trial_ate IS NULL OR a.trial_ate <= now()) THEN
    RETURN NULL;
  END IF;
  SELECT * INTO cp FROM public.cupons WHERE id=a.cupom_id AND ativo AND (validade IS NULL OR validade>=c.inicio::date) AND (empresa_id IS NULL OR empresa_id=_empresa_id) AND (limite_usos IS NULL OR usos<limite_usos) FOR UPDATE;
