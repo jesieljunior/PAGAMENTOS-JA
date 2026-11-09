@@ -11,18 +11,29 @@ async function executarPurgar(request: Request): Promise<Response> {
   const agoraIso = agora.toISOString();
   const { data: expiradas, error } = await supabaseAdmin
     .from("pontos")
-    .select("id, foto_url")
+    .select("id")
     .or("foto_url.not.is.null,gps_lat.not.is.null,gps_lng.not.is.null")
     .lte("evidencia_expira_em", agoraIso)
     .limit(500);
   if (error) return Response.json({ error: error.message }, { status: 500 });
 
-  const caminhos = (expiradas ?? [])
-    .map((ponto) => ponto.foto_url)
-    .filter(
-      (caminho): caminho is string =>
-        Boolean(caminho) && !/^(data:|https?:\/\/|blob:)/i.test(caminho),
-    );
+  const ids = (expiradas ?? []).map((ponto) => ponto.id);
+  let caminhos: string[] = [];
+  if (ids.length) {
+    const { data: evidencias, error: erroEvidencias } = await supabaseAdmin
+      .from("pontos")
+      .select("foto_url")
+      .in("id", ids)
+      .not("foto_url", "like", "data:%")
+      .not("foto_url", "like", "http%")
+      .not("foto_url", "like", "blob:%");
+    if (erroEvidencias) {
+      return Response.json({ error: erroEvidencias.message }, { status: 500 });
+    }
+    caminhos = (evidencias ?? [])
+      .map((ponto) => ponto.foto_url)
+      .filter((caminho): caminho is string => Boolean(caminho));
+  }
   if (caminhos.length) {
     const { error: storageError } = await supabaseAdmin.storage
       .from("selfies-ponto")
@@ -32,7 +43,6 @@ async function executarPurgar(request: Request): Promise<Response> {
     }
   }
 
-  const ids = (expiradas ?? []).map((ponto) => ponto.id);
   if (ids.length) {
     const { error: updateError } = await supabaseAdmin
       .from("pontos")
