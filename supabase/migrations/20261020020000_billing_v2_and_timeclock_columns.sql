@@ -737,7 +737,11 @@ UPDATE public.cupons cu
 SET usos=cu.usos+1
 FROM novos_ciclos nc
 JOIN public.assinaturas a ON a.empresa_id=nc.empresa_id
-WHERE a.cupom_id=cu.id;
+WHERE a.cupom_id=cu.id
+  AND cu.ativo
+  AND (cu.validade IS NULL OR cu.validade>=nc.inicio::date)
+  AND (cu.empresa_id IS NULL OR cu.empresa_id=nc.empresa_id)
+  AND (cu.limite_usos IS NULL OR cu.usos<cu.limite_usos);
 CREATE OR REPLACE FUNCTION public.fechar_fatura_ciclo(_empresa_id uuid,_ref timestamptz)
 RETURNS uuid LANGUAGE plpgsql SECURITY DEFINER SET search_path=public AS $$
 DECLARE c public.ciclos_cobranca; v_id uuid; v_usadas int; v_exc int; v_bruto numeric; v_desc numeric:=0;
