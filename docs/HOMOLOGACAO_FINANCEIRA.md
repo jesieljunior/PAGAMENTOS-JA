@@ -85,7 +85,7 @@ A inspeção foi feita em modo somente leitura no projeto **JÁ - BANCO DE DADOS
 
 Não execute o conjunto de migrations como se o banco estivesse vazio. A migration Billing V2 foi ajustada para tolerar as duas tabelas de ponto já existentes e para substituir as policies que já estavam instaladas. A sequência final ainda depende da conferência de todas as estruturas anteriores e da validação do fluxo de faturamento.
 
-A migration `20261104130000` agora verifica duplicidades de débito/crédito por pagamento antes de criar os índices únicos. A migration final também verifica duplicidade de crédito por cobrança. Nenhum lançamento é removido automaticamente.
+A migration `20261104130000` agora verifica duplicidades de débito/crédito por pagamento antes de criar os índices únicos. A migration final também verifica duplicidade de crédito por cobrança e referências Asaas repetidas. A RPC de funding não restaura saldo já reservado/consumido; ela confere o crédito histórico por empresa e valor. A RPC de Pix preserva estados terminais contra atualizações concorrentes antigas e confere os lançamentos existentes antes de considerá-los idempotentes. Nenhum lançamento é removido automaticamente.
 
 A migration final também ajusta a auditoria para permitir `ator_id = NULL` exclusivamente em eventos automáticos (`ator_contexto = 'sistema'`). Ações atribuídas a usuários continuam exigindo identificador de ator. O identificador do recurso é gravado como UUID, e os resultados de auditoria respeitam os valores aceitos (`sucesso` e `falha`).
 
@@ -212,7 +212,7 @@ Resultado esperado: nenhuma linha. Se houver registros antigos, reconcilie com o
 
 ## 6. Pendências funcionais que ainda bloqueiam a homologação
 
-- O fluxo `selecionarPlanoEmpresa` cria uma fatura imediatamente com `ciclo_inicio = agora` e `ciclo_fim = agora + 30 dias`, enquanto `abrir_ciclo_cobranca` usa o ciclo ancorado em `assinaturas.inicio_ciclo`. É necessário unificar essas referências antes de liberar faturamento recorrente; caso contrário, a fatura imediata pode não corresponder ao ciclo salvo em `ciclos_cobranca` e pode haver cobrança duplicada no fechamento do ciclo.
+- O fluxo `selecionarPlanoEmpresa` cria uma fatura imediatamente com `ciclo_inicio = agora` e `ciclo_fim = agora + 30 dias`, enquanto `abrir_ciclo_cobranca` usa o ciclo ancorado em `assinaturas.inicio_ciclo`. Além da divergência de ciclo, uma nova tentativa de seleção pode gerar outro `faturaId` e outra cobrança Asaas. É necessário definir a regra de mudança de plano (imediata/próximo ciclo) e tornar a criação da fatura idempotente antes de liberar faturamento recorrente.
 - O fluxo de webhook ainda não implementa uma política contábil para reembolso total, reembolso parcial e chargeback do Asaas. Esses eventos precisam de tratamento explícito antes de operar com dinheiro real.
 - A aplicação de migrations não deve começar enquanto a reconciliação do histórico ausente e a sequência completa de dependências não estiverem fechadas.
 
