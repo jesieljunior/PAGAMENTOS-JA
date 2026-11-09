@@ -6,10 +6,7 @@
  * por isso, ele não liquida automaticamente faturas SaaS nem libera funding.
  * Esses casos exigem conciliação manual fora do fluxo automático.
  */
-export const EVENTOS_FATURA_SAAS = new Set<string>([
-  "PAYMENT_RECEIVED",
-  "PAYMENT_CONFIRMED",
-]);
+export const EVENTOS_FATURA_SAAS = new Set<string>(["PAYMENT_RECEIVED", "PAYMENT_CONFIRMED"]);
 
 /** Funding operacional só é liberado quando o Asaas confirma saldo disponível. */
 export const EVENTOS_CREDITO_SALDO = new Set<string>(["PAYMENT_RECEIVED"]);
