@@ -484,8 +484,67 @@ INSERT INTO storage.buckets (id, name, public)
 VALUES ('selfies-ponto', 'selfies-ponto', false)
 ON CONFLICT (id) DO NOTHING;
 
+-- O upload público só aceita imagens no caminho esperado e vinculadas a uma escala
+-- de uma empresa ativa com assinatura válida.
+CREATE OR REPLACE FUNCTION public.pode_enviar_selfie_ponto(
+  _escala_id text,
+  _empresa_id text DEFAULT NULL
+)
+RETURNS boolean
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = pg_catalog, public
+AS $
+  SELECT EXISTS (
+    SELECT 1
+    FROM public.escalas s
+    JOIN public.equipes eq ON eq.id = s.equipe_id
+    JOIN public.eventos e ON e.id = eq.evento_id
+    JOIN public.empresas em ON em.id = e.empresa_id
+    JOIN public.assinaturas a ON a.empresa_id = e.empresa_id
+    WHERE s.id::text = _escala_id
+      AND (_empresa_id IS NULL OR e.empresa_id::text = _empresa_id)
+      AND s.status NOT IN ('recusado', 'substituido')
+      AND e.status NOT IN ('fechamento', 'pagamento', 'concluido', 'arquivado', 'cancelado')
+      AND em.ativa
+      AND (
+        a.status = 'ativa'
+        OR (a.status IN ('trial', 'em_trial') AND a.trial_ate > now())
+      )
+  );
+$;
+
+REVOKE ALL ON FUNCTION public.pode_enviar_selfie_ponto(text, text) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.pode_enviar_selfie_ponto(text, text)
+  TO anon, authenticated, service_role;
+
+UPDATE storage.buckets
+SET file_size_limit = 5242880,
+    allowed_mime_types = ARRAY['image/jpeg', 'image/png', 'image/webp']
+WHERE id = 'selfies-ponto';
+
 DROP POLICY IF EXISTS "selfies_insert_publico" ON storage.objects;
 CREATE POLICY "selfies_insert_publico" ON storage.objects
   FOR INSERT TO anon, authenticated
-  WITH CHECK (bucket_id = 'selfies-ponto');
+  WITH CHECK (
+    bucket_id = 'selfies-ponto'
+    AND name ~* '^(publico|[0-9a-f-]{36})/[0-9a-f-]{36}/[0-9a-f-]{8}-[0-9a-f-]{4}-[0-9a-f-]{4}-[0-9a-f-]{4}-[0-9a-f-]{12}\\.(jpg|png|webp)
+
+
+    AND (
+      (
+        (storage.foldername(name))[1] = 'publico'
+        AND public.pode_enviar_selfie_ponto((storage.foldername(name))[2], NULL)
+      )
+      OR (
+        auth.role() = 'authenticated'
+        AND (storage.foldername(name))[1] = public.empresa_atual()::text
+        AND public.pode_enviar_selfie_ponto(
+          (storage.foldername(name))[2],
+          public.empresa_atual()::text
+        )
+      )
+    )
+  );
 
