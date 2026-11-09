@@ -318,6 +318,7 @@ AS $$
 DECLARE
   v_pagamento RECORD;
   v_empresa_real uuid;
+  v_mov_debito RECORD;
 BEGIN
   IF auth.role() IS DISTINCT FROM 'service_role' THEN
     RAISE EXCEPTION 'Efetivação de Pix permitida somente por serviço autenticado.';
@@ -364,17 +365,28 @@ BEGIN
   END IF;
 
   -- Estados terminais não podem regredir por uma resposta antiga concorrente.
+  -- Se o Asaas já confirmou a execução, preserva esse estado e conclui a conferência do ledger.
   IF v_pagamento.status = 'executado' AND _status_final <> 'executado' THEN
-    RETURN jsonb_build_object(
-      'ok', true,
-      'ja_processada', true,
-      'status', 'executado',
-      'transferencia_id', _txid
-    );
+    _status_final := 'executado';
+    _executado_em := COALESCE(_executado_em, now());
+    _erro := NULL;
   END IF;
 
   IF v_pagamento.status IN ('falhou', 'estornado') THEN
     RAISE EXCEPTION 'Pagamento em estado terminal (%) exige reconciliação antes de nova efetivação.', v_pagamento.status;
+  END IF;
+
+  SELECT id, valor, empresa_id
+  INTO v_mov_debito
+  FROM public.movimentos_saldo
+  WHERE pagamento_id = _pagamento_id AND tipo = 'debito'
+  FOR UPDATE;
+
+  IF v_mov_debito.id IS NOT NULL AND (
+    v_mov_debito.empresa_id IS DISTINCT FROM v_empresa_real
+    OR round(v_mov_debito.valor, 2) <> round(v_pagamento.valor, 2)
+  ) THEN
+    RAISE EXCEPTION 'Débito histórico diverge da empresa ou do valor do pagamento (%).', _pagamento_id;
   END IF;
 
   UPDATE public.pagamentos
@@ -388,19 +400,17 @@ BEGIN
   WHERE id = _pagamento_id;
 
   -- A linha do pagamento está bloqueada; o índice parcial único é uma segunda barreira.
-  INSERT INTO public.movimentos_saldo (
-    empresa_id, tipo, valor, descricao, pagamento_id
-  )
-  SELECT
-    v_empresa_real,
-    'debito',
-    v_pagamento.valor,
-    COALESCE(_descricao_debito, 'Pix para freelancer'),
-    _pagamento_id
-  WHERE NOT EXISTS (
-    SELECT 1 FROM public.movimentos_saldo
-    WHERE pagamento_id = _pagamento_id AND tipo = 'debito'
-  );
+  IF v_mov_debito.id IS NULL THEN
+    INSERT INTO public.movimentos_saldo (
+      empresa_id, tipo, valor, descricao, pagamento_id
+    ) VALUES (
+      v_empresa_real,
+      'debito',
+      v_pagamento.valor,
+      COALESCE(_descricao_debito, 'Pix para freelancer'),
+      _pagamento_id
+    );
+  END IF;
 
   RETURN jsonb_build_object('ok', true, 'status', _status_final, 'transferencia_id', _txid);
 END;
@@ -473,18 +483,35 @@ BEGIN
     RAISE EXCEPTION 'TXID vinculado ao pagamento diverge da transferência recebida.';
   END IF;
 
-  SELECT id, valor
+  SELECT id, valor, empresa_id
   INTO v_mov_debito
   FROM public.movimentos_saldo
   WHERE pagamento_id = _pagamento_id AND tipo = 'debito'
   FOR UPDATE;
 
-  IF v_mov_debito.id IS NOT NULL THEN
-    SELECT id
-    INTO v_mov_credito
-    FROM public.movimentos_saldo
-    WHERE pagamento_id = _pagamento_id AND tipo = 'credito'
-    FOR UPDATE;
+  SELECT id, valor, empresa_id
+  INTO v_mov_credito
+  FROM public.movimentos_saldo
+  WHERE pagamento_id = _pagamento_id AND tipo = 'credito'
+  FOR UPDATE;
+
+  IF v_mov_debito.id IS NOT NULL AND (
+    v_mov_debito.empresa_id IS DISTINCT FROM v_empresa_real
+    OR round(v_mov_debito.valor, 2) <> round(v_pagamento.valor, 2)
+  ) THEN
+    RAISE EXCEPTION 'Débito do pagamento diverge da empresa ou do valor esperado (%).', _pagamento_id;
+  END IF;
+
+  IF v_mov_credito.id IS NOT NULL AND (
+    v_mov_debito.id IS NULL
+    OR v_mov_credito.empresa_id IS DISTINCT FROM v_empresa_real
+    OR round(v_mov_credito.valor, 2) <> round(v_mov_debito.valor, 2)
+  ) THEN
+    RAISE EXCEPTION 'Crédito de estorno não corresponde ao débito original (%).', _pagamento_id;
+  END IF;
+
+  IF v_pagamento.status = 'estornado' THEN
+    _status_final := 'estornado';
   END IF;
 
   UPDATE public.pagamentos
