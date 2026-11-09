@@ -80,16 +80,21 @@ export const Route = createFileRoute("/api/public/webhooks/asaas")({
           // Erro 23505 = chave de idempotência já adquirida/processada
           if (erroIdempotencia.code === "23505") {
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            const { data: eventoDb } = await (supabaseAdmin as any)
+            const { data: eventoDb, error: erroLeituraEvento } = await (supabaseAdmin as any)
               .from("webhook_eventos")
               .select("id, status, tentativas, atualizado_em")
               .eq("chave_idempotencia", chaveIdempotencia)
               .maybeSingle();
 
+            if (erroLeituraEvento) {
+              console.error("[webhook asaas] Falha ao recuperar evento existente:", erroLeituraEvento);
+              return new Response("Falha ao recuperar evento existente", { status: 503 });
+            }
+
             if (eventoDb) {
               eventoExistente = eventoDb;
             } else {
-              return new Response("ok", { status: 200 });
+              return new Response("Evento duplicado sem registro recuperável", { status: 503 });
             }
           } else {
             console.error(
