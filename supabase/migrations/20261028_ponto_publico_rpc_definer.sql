@@ -432,7 +432,11 @@ BEGIN
     'pendente'::public.status_ponto,
     v_fora_horario,
     CASE WHEN _foto_url IS NOT NULL THEN v_agora ELSE NULL END,
-    CASE WHEN _foto_url IS NOT NULL THEN v_agora + (v_retencao_dias || ' days')::interval ELSE NULL END
+    CASE
+      WHEN _foto_url IS NOT NULL OR _gps_lat IS NOT NULL OR _gps_lng IS NOT NULL
+        THEN v_agora + (v_retencao_dias || ' days')::interval
+      ELSE NULL
+    END
   )
   RETURNING id INTO v_ponto_id;
 
