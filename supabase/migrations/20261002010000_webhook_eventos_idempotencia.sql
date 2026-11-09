@@ -8,19 +8,20 @@ create table if not exists public.webhook_eventos (
   atualizado_em timestamptz not null default now()
 );
 
-grant select, insert on public.webhook_eventos to authenticated;
-grant all on public.webhook_eventos to service_role;
+revoke all on table public.webhook_eventos from public, anon, authenticated;
+grant all on table public.webhook_eventos to service_role;
 
 alter table public.webhook_eventos enable row level security;
 
+drop policy if exists "webhook_eventos_leitura" on public.webhook_eventos;
 create policy "webhook_eventos_leitura" on public.webhook_eventos
 for select to authenticated
 using (public.eh_equipe_plataforma());
 
-create policy "webhook_eventos_insercao" on public.webhook_eventos
-for insert to authenticated
-with check (public.eh_equipe_plataforma() or auth.uid() is not null);
+-- Escrita reservada ao backend/service_role; não existe política de INSERT para authenticated.
+drop policy if exists "webhook_eventos_insercao" on public.webhook_eventos;
 
+drop trigger if exists tg_webhook_eventos_atualizado_em on public.webhook_eventos;
 create trigger tg_webhook_eventos_atualizado_em
 before update on public.webhook_eventos
 for each row execute function public.tg_atualizado_em();
