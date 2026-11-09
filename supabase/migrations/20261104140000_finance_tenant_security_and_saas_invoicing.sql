@@ -400,5 +400,5 @@ GRANT EXECUTE ON FUNCTION public.liquidar_fatura_plataforma_asaas(uuid, text, nu
 -- 7. Expansão de status da assinatura para suportar 'pendente' e 'aguardando_pagamento'
 ALTER TABLE public.assinaturas DROP CONSTRAINT IF EXISTS assinaturas_status_check;
 ALTER TABLE public.assinaturas ADD CONSTRAINT assinaturas_status_check
-  CHECK (status IN ('trial', 'ativa', 'bloqueada', 'cancelada', 'pendente', 'aguardando_pagamento'));
+  CHECK (status IN ('trial', 'em_trial', 'ativa', 'bloqueada', 'cancelada', 'pendente', 'aguardando_pagamento'));
 
