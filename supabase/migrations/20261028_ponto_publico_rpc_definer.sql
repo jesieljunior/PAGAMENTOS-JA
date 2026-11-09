@@ -325,11 +325,14 @@ BEGIN
   END IF;
 
   IF v_evento.qr_code_expira_em IS NOT NULL THEN
-    IF v_agora > v_evento.qr_code_expira_em
-       AND v_agora - COALESCE(v_evento.qr_code_gerado_em, v_evento.criado_em) > interval '12 hours' THEN
+    IF v_agora > v_evento.qr_code_expira_em THEN
       RAISE EXCEPTION 'QR Code expirado.';
     END IF;
-  ELSIF v_evento.data_fim IS NOT NULL AND v_agora > v_evento.data_fim + interval '12 hours' THEN
+  ELSIF v_evento.data_fim IS NOT NULL THEN
+    IF v_agora > v_evento.data_fim + interval '12 hours' THEN
+      RAISE EXCEPTION 'QR Code expirado.';
+    END IF;
+  ELSIF v_agora > COALESCE(v_evento.qr_code_gerado_em, v_evento.criado_em) + interval '12 hours' THEN
     RAISE EXCEPTION 'QR Code expirado.';
   END IF;
 
