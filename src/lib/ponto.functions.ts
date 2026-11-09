@@ -4,10 +4,7 @@ import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { createSupabasePublicClient } from "@/integrations/supabase/public.server";
 import { type EscalaSessao, type PontoSessao, salvarSessaoEvento } from "./ponto-store.server";
-import {
-  criarTokenQrCodeAssinado,
-  decodificarTokenQrCode,
-} from "./ponto.signed-token";
+import { criarTokenQrCodeAssinado, decodificarTokenQrCode } from "./ponto.signed-token";
 
 // Suporta tokens padrão (ex: UUID ou hash) e tokens assinados (prefixo qr.)
 const tokenSchema = z.object({ token: z.string().min(8).max(2048) });
@@ -71,7 +68,7 @@ const identificacaoResultSchema = z.object({
 });
 
 /**
- * Valida a vigência e expiração do QR Code do evento com tolerância para eventos recentes.
+ * Valida a vigência do QR Code usando o prazo persistido, sem renovação deslizante.
  */
 export function validarValidadeQr(evento: {
   id?: string;
