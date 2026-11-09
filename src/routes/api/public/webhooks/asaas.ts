@@ -87,7 +87,10 @@ export const Route = createFileRoute("/api/public/webhooks/asaas")({
               .maybeSingle();
 
             if (erroLeituraEvento) {
-              console.error("[webhook asaas] Falha ao recuperar evento existente:", erroLeituraEvento);
+              console.error(
+                "[webhook asaas] Falha ao recuperar evento existente:",
+                erroLeituraEvento,
+              );
               return new Response("Falha ao recuperar evento existente", { status: 503 });
             }
 
