@@ -86,8 +86,7 @@ export function validarValidadeQr(evento: {
     ? new Date(evento.qr_code_expira_em).getTime()
     : evento.data_fim
       ? new Date(evento.data_fim).getTime() + 12 * 60 * 60_000
-      : new Date(evento.qr_code_gerado_em ?? evento.criado_em ?? "").getTime() +
-        12 * 60 * 60_000;
+      : new Date(evento.qr_code_gerado_em ?? evento.criado_em ?? "").getTime() + 12 * 60 * 60_000;
 
   if (!Number.isFinite(expira) || agora > expira) {
     throw new Error(
