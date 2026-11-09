@@ -392,22 +392,25 @@ export const rotacionarQrEvento = createServerFn({ method: "POST" })
       },
     });
 
-    const signedToken = criarTokenQrCodeAssinado({
-      id: evento.id,
-      empresa_id: evento.empresa_id,
-      nome: evento.nome,
-      local: evento.local,
-      status: evento.status,
-      data_inicio: evento.data_inicio,
-      data_fim: evento.data_fim,
-      qr_code_expira_em: expiraEm,
-      qr_code_token: token,
-    }, {
-      exigeSelfie: false,
-      exigeGps: false,
-      pontoBasico: false,
-      expiraEm,
-    });
+    const signedToken = criarTokenQrCodeAssinado(
+      {
+        id: evento.id,
+        empresa_id: evento.empresa_id,
+        nome: evento.nome,
+        local: evento.local,
+        status: evento.status,
+        data_inicio: evento.data_inicio,
+        data_fim: evento.data_fim,
+        qr_code_expira_em: expiraEm,
+        qr_code_token: token,
+      },
+      {
+        exigeSelfie: false,
+        exigeGps: false,
+        pontoBasico: false,
+        expiraEm,
+      },
+    );
 
     salvarSessaoEvento({
       eventoId: evento.id,
