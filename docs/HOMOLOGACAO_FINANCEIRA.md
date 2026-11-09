@@ -20,14 +20,24 @@ HAVING COUNT(*) > 1;
 
 Resultado esperado: nenhuma linha. Se houver resultados, não remova lançamentos automaticamente. Reconcilie cada cobrança com o registro do Asaas e o extrato financeiro antes de continuar.
 
-## 2. Aplicar migrations
+## 2. Pré-requisitos e ordem das migrations
 
-Aplique as migrations pendentes na ordem cronológica, incluindo:
+Não aplique apenas as duas migrations finais isoladamente. A liquidação de faturas depende da tabela `faturas_plataforma`, criada na migration de Billing V2, e as RPCs de Pix dependem dos estados adicionais do enum `status_pagamento`.
 
-- `20261105130000_harden_saas_invoice_settlement.sql`
-- `20261106130000_financial_integrity_hardening.sql`
+Confirme que todas as migrations anteriores do projeto foram aplicadas. Para este conjunto financeiro, a sequência de dependências é:
 
-A migration de hardening adiciona a coluna `client_secret_cifrado`, cria o índice único parcial de crédito por cobrança e instala as RPCs financeiras protegidas.
+1. `20261020020000_billing_v2_and_timeclock_columns.sql` — cria `faturas_plataforma` e estruturas de faturamento V2.
+2. `20261104120000_status_pagamento_states.sql` — adiciona `processando`, `aguardando_aprovacao` e `estornado`.
+3. `20261104130000_financial_resilience_and_timeclock_audit.sql` — prepara estados, webhooks e RPCs de processamento.
+4. `20261104140000_finance_tenant_security_and_saas_invoicing.sql` — reforça isolamento de tenant e instala a liquidação inicial de faturas.
+5. `20261105130000_harden_saas_invoice_settlement.sql` — restringe a liquidação de faturas a `service_role`.
+6. `20261106130000_financial_integrity_hardening.sql` — instala as proteções transacionais finais para funding, Pix de saída, estornos e faturas SaaS.
+
+A migration final não configura nem altera credenciais do Mercado Pago. A aplicação está sendo homologada com Asaas.
+
+A migration final também ajusta a auditoria para permitir `ator_id = NULL` exclusivamente em eventos automáticos (`ator_contexto = 'sistema'`). Ações atribuídas a usuários continuam exigindo identificador de ator. O identificador do recurso é gravado como UUID, e os resultados de auditoria respeitam os valores aceitos (`sucesso` e `falha`).
+
+**Importante:** o banco de teste consultado ainda não possui `faturas_plataforma` e não apresenta os três novos estados de `status_pagamento`. Portanto, ele ainda não está pronto para receber somente a migration final. Não avance para produção.
 
 ## 3. Validar permissões das RPCs
 
