@@ -16,6 +16,7 @@ SECURITY DEFINER
 SET search_path = public, pg_temp
 AS $$
 DECLARE
+  v_total_token integer;
   v_total_ip integer;
   v_total_cpf integer;
   v_tentativa_id uuid;
@@ -35,6 +36,13 @@ BEGIN
     hashtextextended(_token_hash || ':' || _ip_hash, 0)
   );
 
+  -- Limite global por QR para conter ataques distribuídos sem afetar eventos usuais.
+  SELECT count(*)::integer
+  INTO v_total_token
+  FROM public.tentativas_ponto_publico t
+  WHERE t.token_hash = _token_hash
+    AND t.criado_em >= now() - interval '10 minutes';
+
   -- Limite amplo por IP para não bloquear equipes grandes atrás do mesmo NAT.
   SELECT count(*)::integer
   INTO v_total_ip
@@ -51,7 +59,7 @@ BEGIN
     AND t.cpf_hash = _cpf_hash
     AND t.criado_em >= now() - interval '10 minutes';
 
-  IF v_total_ip >= 1200 OR v_total_cpf >= 10 THEN
+  IF v_total_token >= 10000 OR v_total_ip >= 1200 OR v_total_cpf >= 10 THEN
     RETURN QUERY SELECT false, NULL::uuid;
     RETURN;
   END IF;
@@ -75,6 +83,9 @@ BEGIN
   RETURN QUERY SELECT true, v_tentativa_id;
 END;
 $$;
+
+CREATE INDEX IF NOT EXISTS tentativas_ponto_token_created_idx
+  ON public.tentativas_ponto_publico (token_hash, criado_em DESC);
 
 CREATE INDEX IF NOT EXISTS tentativas_ponto_token_cpf_idx
   ON public.tentativas_ponto_publico (token_hash, cpf_hash, criado_em DESC)
