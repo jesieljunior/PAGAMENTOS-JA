@@ -16,7 +16,8 @@ SECURITY DEFINER
 SET search_path = public, pg_temp
 AS $$
 DECLARE
-  v_total integer;
+  v_total_ip integer;
+  v_total_cpf integer;
   v_tentativa_id uuid;
 BEGIN
   IF _token_hash IS NULL
@@ -31,14 +32,23 @@ BEGIN
     hashtextextended(_token_hash || ':' || _ip_hash, 0)
   );
 
+  -- Limite amplo por IP para não bloquear equipes grandes atrás do mesmo NAT.
   SELECT count(*)::integer
-  INTO v_total
+  INTO v_total_ip
   FROM public.tentativas_ponto_publico t
   WHERE t.token_hash = _token_hash
     AND t.ip_hash = _ip_hash
     AND t.criado_em >= now() - interval '10 minutes';
 
-  IF v_total >= 20 THEN
+  -- Limite individual por CPF para conter enumeração/brute force.
+  SELECT count(*)::integer
+  INTO v_total_cpf
+  FROM public.tentativas_ponto_publico t
+  WHERE t.token_hash = _token_hash
+    AND t.cpf_hash = _cpf_hash
+    AND t.criado_em >= now() - interval '10 minutes';
+
+  IF v_total_ip >= 1200 OR v_total_cpf >= 10 THEN
     RETURN QUERY SELECT false, NULL::uuid;
     RETURN;
   END IF;
@@ -62,6 +72,10 @@ BEGIN
   RETURN QUERY SELECT true, v_tentativa_id;
 END;
 $$;
+
+CREATE INDEX IF NOT EXISTS tentativas_ponto_token_cpf_idx
+  ON public.tentativas_ponto_publico (token_hash, cpf_hash, criado_em DESC)
+  WHERE cpf_hash IS NOT NULL;
 
 REVOKE ALL ON FUNCTION public.iniciar_tentativa_ponto_publico(text, text, text, text)
   FROM PUBLIC, anon, authenticated;
