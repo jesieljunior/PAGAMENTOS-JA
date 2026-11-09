@@ -262,7 +262,7 @@ export async function enviarPix(supabase: any, pagamentoId: string, empresaId?: 
     return {
       ok: true,
       txid: transferenciaId,
-      status: statusFinal,
+      status: resultadoRpc.status ?? statusFinal,
       taxa: 0,
     };
   } catch (e) {
