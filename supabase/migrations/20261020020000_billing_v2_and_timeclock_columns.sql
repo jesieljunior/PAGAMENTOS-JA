@@ -699,7 +699,7 @@ BEGIN
  IF a.id IS NOT NULL AND a.status NOT IN ('ativa','trial','em_trial','pendente','aguardando_pagamento') THEN
    RETURN NULL;
  END IF;
- SELECT * INTO cp FROM public.cupons WHERE id=a.cupom_id AND ativo AND (validade IS NULL OR validade>=c.inicio::date) AND (empresa_id IS NULL OR empresa_id=_empresa_id) AND (limite_usos IS NULL OR usos<limite_usos);
+ SELECT * INTO cp FROM public.cupons WHERE id=a.cupom_id AND ativo AND (validade IS NULL OR validade>=c.inicio::date) AND (empresa_id IS NULL OR empresa_id=_empresa_id) AND (limite_usos IS NULL OR usos<limite_usos) FOR UPDATE;
  INSERT INTO public.ciclos_cobranca(empresa_id,assinatura_id,plano_id,plano_nome,inicio,fim,mensalidade,participacoes_incluidas,valor_excedente,desconto_tipo,desconto_valor,trial_ate)
  VALUES(_empresa_id,a.id,p.id,p.nome,c.inicio,c.fim,coalesce(a.mensalidade_override,p.mensalidade),p.participacoes_incluidas,p.valor_excedente,cp.tipo,coalesce(cp.valor,0),a.trial_ate) RETURNING id INTO v_id;
  IF cp.id IS NOT NULL THEN UPDATE public.cupons SET usos=usos+1 WHERE id=cp.id; END IF;
