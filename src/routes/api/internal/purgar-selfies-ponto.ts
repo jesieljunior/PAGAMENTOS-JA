@@ -19,7 +19,10 @@ async function executarPurgar(request: Request): Promise<Response> {
 
   const caminhos = (expiradas ?? [])
     .map((ponto) => ponto.foto_url)
-    .filter((caminho): caminho is string => Boolean(caminho));
+    .filter(
+      (caminho): caminho is string =>
+        Boolean(caminho) && !/^(data:|https?:\/\/|blob:)/i.test(caminho),
+    );
   if (caminhos.length) {
     const { error: storageError } = await supabaseAdmin.storage
       .from("selfies-ponto")
