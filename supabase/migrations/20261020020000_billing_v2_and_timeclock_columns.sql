@@ -746,7 +746,9 @@ END; $$;
 CREATE TRIGGER tg_cobrancas_plano BEFORE INSERT ON public.cobrancas FOR EACH ROW EXECUTE FUNCTION public.tg_financeiro_recurso();
 CREATE TRIGGER tg_fundings_plano BEFORE INSERT ON public.fundings FOR EACH ROW EXECUTE FUNCTION public.tg_financeiro_recurso();
 CREATE TRIGGER tg_lotes_plano BEFORE INSERT ON public.lotes_pagamento FOR EACH ROW EXECUTE FUNCTION public.tg_financeiro_recurso();
+DROP POLICY IF EXISTS bloqueio_leitura_fechamento_free ON public.fechamentos;
 CREATE POLICY bloqueio_leitura_fechamento_free ON public.fechamentos AS RESTRICTIVE FOR SELECT TO authenticated USING(public.tem_papel_plataforma(auth.uid(),'admin_master') OR public.recurso_habilitado(public.empresa_da_escala(escala_id),'fechamento'));
+DROP POLICY IF EXISTS bloqueio_leitura_pagamentos_free ON public.pagamentos;
 CREATE POLICY bloqueio_leitura_pagamentos_free ON public.pagamentos AS RESTRICTIVE FOR SELECT TO authenticated USING(public.tem_papel_plataforma(auth.uid(),'admin_master') OR public.recurso_habilitado(public.empresa_do_fechamento(fechamento_id),'financeiro'));
 CREATE OR REPLACE FUNCTION public.processar_cobranca_v2() RETURNS void LANGUAGE plpgsql SECURITY DEFINER SET search_path=public AS $$ DECLARE c record; BEGIN
  FOR c IN SELECT empresa_id,inicio FROM public.ciclos_cobranca WHERE fim<=now() AND NOT EXISTS (SELECT 1 FROM public.faturas_plataforma f WHERE f.empresa_id=ciclos_cobranca.empresa_id AND f.ciclo_inicio=ciclos_cobranca.inicio) LOOP
