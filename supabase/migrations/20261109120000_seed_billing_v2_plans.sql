@@ -32,3 +32,25 @@ INSERT INTO public.planos (
   '{"fechamento":true,"financeiro":true,"agendamento_pix":true,"pix_massa":true,"relatorios_avancados":true,"exportacao_avancada":true,"importacao_excel":true,"api":true,"suporte_prioritario":true}'::jsonb
 )
 ON CONFLICT DO NOTHING;
+
+-- Organizações antigas sem assinatura não recebem acesso gratuito ilimitado.
+-- São vinculadas ao plano Free, mas bloqueadas até a seleção explícita de um plano.
+INSERT INTO public.assinaturas (
+  empresa_id, plano_id, status, trial_ate, inicio_ciclo, observacoes
+)
+SELECT
+  e.id,
+  p.id,
+  'bloqueada',
+  NULL,
+  e.criado_em,
+  'Assinatura criada na migração Billing V2; aguardando seleção explícita de plano.'
+FROM public.empresas e
+CROSS JOIN public.planos p
+WHERE p.codigo = 'free'
+  AND NOT EXISTS (
+    SELECT 1
+    FROM public.assinaturas a
+    WHERE a.empresa_id = e.id
+  );
+
