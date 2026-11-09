@@ -323,7 +323,7 @@ export const Route = createFileRoute("/api/public/webhooks/asaas")({
               .from("cobrancas")
               .update({ status: "vencido" })
               .eq("parceiro_cobranca_id", corpo.payment.id)
-              .neq("status", "pago");
+              .in("status", ["rascunho", "aguardando_pagamento", "vencido"]);
             if (erroCobrancaVencida) throw erroCobrancaVencida;
 
             // Atualiza também faturas SaaS ainda não liquidadas.
