@@ -707,41 +707,29 @@ BEGIN
 END; $$;
 REVOKE ALL ON FUNCTION public.abrir_ciclo_cobranca(uuid) FROM PUBLIC,anon,authenticated;
 GRANT EXECUTE ON FUNCTION public.abrir_ciclo_cobranca(uuid) TO service_role;
-WITH novos_ciclos AS (
-  INSERT INTO public.ciclos_cobranca(
-    empresa_id,assinatura_id,plano_id,plano_nome,inicio,fim,mensalidade,
-    participacoes_incluidas,valor_excedente,desconto_tipo,desconto_valor,trial_ate
-  )
-  SELECT
-    a.empresa_id,a.id,p.id,p.nome,c.inicio,c.fim,
-    coalesce(a.mensalidade_override,p.mensalidade),
-    p.participacoes_incluidas,p.valor_excedente,cp.tipo,coalesce(cp.valor,0),a.trial_ate
-  FROM public.assinaturas a
-  JOIN public.planos p ON p.id=a.plano_id
-  CROSS JOIN LATERAL public.ciclo_da_empresa(a.empresa_id,now()) c
-  LEFT JOIN LATERAL (
-    SELECT cu.tipo, cu.valor
-    FROM public.cupons cu
-    WHERE cu.id=a.cupom_id
-      AND cu.ativo
-      AND (cu.validade IS NULL OR cu.validade>=c.inicio::date)
-      AND (cu.empresa_id IS NULL OR cu.empresa_id=a.empresa_id)
-      AND (cu.limite_usos IS NULL OR cu.usos<cu.limite_usos)
-    LIMIT 1
-  ) cp ON true
-  WHERE a.status IN ('ativa','trial','em_trial','pendente','aguardando_pagamento')
-  ON CONFLICT (empresa_id, inicio) DO NOTHING
-  RETURNING empresa_id, inicio
+INSERT INTO public.ciclos_cobranca(
+  empresa_id,assinatura_id,plano_id,plano_nome,inicio,fim,mensalidade,
+  participacoes_incluidas,valor_excedente,desconto_tipo,desconto_valor,trial_ate
 )
-UPDATE public.cupons cu
-SET usos=cu.usos+1
-FROM novos_ciclos nc
-JOIN public.assinaturas a ON a.empresa_id=nc.empresa_id
-WHERE a.cupom_id=cu.id
-  AND cu.ativo
-  AND (cu.validade IS NULL OR cu.validade>=nc.inicio::date)
-  AND (cu.empresa_id IS NULL OR cu.empresa_id=nc.empresa_id)
-  AND (cu.limite_usos IS NULL OR cu.usos<cu.limite_usos);
+SELECT
+  a.empresa_id,a.id,p.id,p.nome,c.inicio,c.fim,
+  coalesce(a.mensalidade_override,p.mensalidade),
+  p.participacoes_incluidas,p.valor_excedente,cp.tipo,coalesce(cp.valor,0),a.trial_ate
+FROM public.assinaturas a
+JOIN public.planos p ON p.id=a.plano_id
+CROSS JOIN LATERAL public.ciclo_da_empresa(a.empresa_id,now()) c
+LEFT JOIN LATERAL (
+  SELECT cu.tipo, cu.valor
+  FROM public.cupons cu
+  WHERE cu.id=a.cupom_id
+    AND cu.ativo
+    AND (cu.validade IS NULL OR cu.validade>=c.inicio::date)
+    AND (cu.empresa_id IS NULL OR cu.empresa_id=a.empresa_id)
+    AND (cu.limite_usos IS NULL OR cu.usos<cu.limite_usos)
+  LIMIT 1
+) cp ON true
+WHERE a.status IN ('ativa','trial','em_trial','pendente','aguardando_pagamento')
+ON CONFLICT (empresa_id, inicio) DO NOTHING;
 CREATE OR REPLACE FUNCTION public.fechar_fatura_ciclo(_empresa_id uuid,_ref timestamptz)
 RETURNS uuid LANGUAGE plpgsql SECURITY DEFINER SET search_path=public AS $$
 DECLARE c public.ciclos_cobranca; v_id uuid; v_usadas int; v_exc int; v_bruto numeric; v_desc numeric:=0;
