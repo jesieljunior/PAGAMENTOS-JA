@@ -389,13 +389,12 @@ BEGIN
     WHERE q.evento_id = _evento_id AND s.freelancer_id = _freelancer_id AND s.status = 'confirmado'
   );
   IF v_ativa THEN
-    INSERT INTO public.participacoes_operacionais (empresa_id, evento_id, freelancer_id, data_evento, ativa)
+    INSERT INTO public.participacoes_operacionais AS po (empresa_id, evento_id, freelancer_id, data_evento, ativa)
     VALUES (v_ev.empresa_id, _evento_id, _freelancer_id, v_ev.data_inicio, true)
     ON CONFLICT (evento_id, freelancer_id) DO UPDATE
       SET ativa = true, desativada_em = NULL,
           data_evento = CASE
-            WHEN public.participacoes_operacionais.data_evento <= now()
-              THEN public.participacoes_operacionais.data_evento
+            WHEN po.data_evento <= now() THEN po.data_evento
             ELSE excluded.data_evento
           END,
           atualizado_em = now();
