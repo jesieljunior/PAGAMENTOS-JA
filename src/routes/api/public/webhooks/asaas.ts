@@ -154,15 +154,26 @@ export const Route = createFileRoute("/api/public/webhooks/asaas")({
                 ? casQuery.is("tentativas", null)
                 : casQuery.eq("tentativas", tentativas);
 
-            const { data: casUpdate } = await casQuery.select("id");
+            const { data: casUpdate, error: erroCas } = await casQuery.select("id");
+
+            if (erroCas) {
+              console.error("[webhook asaas] Falha ao adquirir retomada do evento:", erroCas);
+              return new Response("Falha ao adquirir processamento do evento", { status: 503 });
+            }
 
             if (!casUpdate || (Array.isArray(casUpdate) && casUpdate.length === 0)) {
-              // Outra instância concorrente assumiu a retomada
-              return new Response("ok", { status: 200 });
+              // Outra instância assumiu; não confirma entrega enquanto ela não concluir.
+              return new Response("Evento já está sendo processado", {
+                status: 503,
+                headers: { "Retry-After": "10" },
+              });
             }
           } else {
-            // Em processamento ativo por outra instância há menos de 5 min -> ignora duplicação simultânea
-            return new Response("ok", { status: 200 });
+            // Outra instância ainda está processando. Resposta não-2xx mantém a retentativa do Asaas.
+            return new Response("Evento em processamento", {
+              status: 503,
+              headers: { "Retry-After": "10" },
+            });
           }
         }
 
