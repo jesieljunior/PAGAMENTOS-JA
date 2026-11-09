@@ -376,19 +376,16 @@ async function registrar(supabase: AdminClient, input: Record<string, unknown>) 
     nome: string,
     argumentos: Record<string, unknown>,
   ) => PromiseLike<{ data: unknown; error: { message: string } | null }>;
-  const { data: resultadoRpc, error: erroRpc } = await chamarRpc(
-    "registrar_ponto_publico",
-    {
-      _token: token,
-      _cpf: cpf,
-      _escala_id: escala.id,
-      _tipo: tipoValido,
-      _foto_url: fotoUrl,
-      _gps_lat: lat,
-      _gps_lng: lng,
-      _consentiu_selfie: input.consentiuSelfie === true,
-    },
-  );
+  const { data: resultadoRpc, error: erroRpc } = await chamarRpc("registrar_ponto_publico", {
+    _token: token,
+    _cpf: cpf,
+    _escala_id: escala.id,
+    _tipo: tipoValido,
+    _foto_url: fotoUrl,
+    _gps_lat: lat,
+    _gps_lng: lng,
+    _consentiu_selfie: input.consentiuSelfie === true,
+  });
 
   if (erroRpc) {
     if (fotoUrl) {
