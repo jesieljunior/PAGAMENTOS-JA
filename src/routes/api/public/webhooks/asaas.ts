@@ -19,7 +19,6 @@ import {
 
 type EventoAsaas = EventoAsaasWebhook;
 
-
 type ResultadoRpcFinanceira = {
   ok?: boolean;
   ja_processada?: boolean;
