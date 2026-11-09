@@ -67,7 +67,7 @@ async function validarAcessoPonto(supabase: AdminClient, empresaId: string): Pro
 
   const trialValido =
     (assinatura?.status === "trial" || assinatura?.status === "em_trial") &&
-    Boolean(assinatura.trial_ate && new Date(assinatura.trial_ate).getTime() > Date.now());
+    Boolean(assinatura?.trial_ate && new Date(assinatura.trial_ate).getTime() > Date.now());
   if (!empresa?.ativa || !(assinatura?.status === "ativa" || trialValido)) {
     throw new RequestError("A agência ou a assinatura não está habilitada para registro de ponto.", 403);
   }
