@@ -46,6 +46,41 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_movimentos_saldo_cobranca_credito
   ON public.movimentos_saldo (cobranca_id)
   WHERE cobranca_id IS NOT NULL AND tipo = 'credito';
 
+-- Um identificador de pagamento do Asaas não pode liquidar duas cobranças locais.
+DO $
+BEGIN
+  IF EXISTS (
+    SELECT 1
+    FROM public.cobrancas
+    WHERE parceiro_cobranca_id IS NOT NULL
+    GROUP BY parceiro_cobranca_id
+    HAVING count(*) > 1
+  ) THEN
+    RAISE EXCEPTION
+      'Há IDs de cobrança Asaas vinculados a mais de uma cobrança local. Reconcilie antes de aplicar a migration 20261106130000.';
+  END IF;
+
+  IF EXISTS (
+    SELECT 1
+    FROM public.faturas_plataforma
+    WHERE referencia_provedor IS NOT NULL
+    GROUP BY referencia_provedor
+    HAVING count(*) > 1
+  ) THEN
+    RAISE EXCEPTION
+      'Há IDs de cobrança Asaas vinculados a mais de uma fatura SaaS. Reconcilie antes de aplicar a migration 20261106130000.';
+  END IF;
+END;
+$;
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_cobrancas_parceiro_cobranca_unique
+  ON public.cobrancas (parceiro_cobranca_id)
+  WHERE parceiro_cobranca_id IS NOT NULL;
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_faturas_plataforma_referencia_provedor_unique
+  ON public.faturas_plataforma (referencia_provedor)
+  WHERE referencia_provedor IS NOT NULL;
+
 -- =============================================================================
 -- 1. Funding: cobrança, crédito, taxa e funding passam a ser uma transação só.
 -- Reprocessar a mesma cobrança corrige estados parciais legados sem duplicar crédito.
