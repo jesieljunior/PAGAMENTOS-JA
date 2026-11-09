@@ -4,7 +4,10 @@ import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { createSupabasePublicClient } from "@/integrations/supabase/public.server";
 import { type EscalaSessao, type PontoSessao, salvarSessaoEvento } from "./ponto-store.server";
-import { criarTokenQrCodeAssinado } from "./ponto.signed-token";
+import {
+  criarTokenQrCodeAssinado,
+  decodificarTokenQrCode,
+} from "./ponto.signed-token";
 
 // Suporta tokens padrão (ex: UUID ou hash) e tokens assinados (prefixo qr.)
 const tokenSchema = z.object({ token: z.string().min(8).max(2048) });
@@ -124,6 +127,13 @@ export function validarValidadeQr(evento: {
 
   // 3. Sem data de fim e sem qr_code_expira_em: válido por 24h a partir de agora
   return new Date(agora + 24 * 60 * 60_000).toISOString();
+}
+
+function tokenQrParaEdge(token: string): string {
+  if (!token.startsWith("qr.") && !token.startsWith("qr_")) return token;
+  const payload = decodificarTokenQrCode(token);
+  if (!payload) throw new Error("QR Code inválido ou expirado.");
+  return payload.qr_code_token;
 }
 
 async function invokePontoEdge<T>(body: Record<string, unknown>, schema: z.ZodType<T>): Promise<T> {
@@ -284,19 +294,28 @@ export const sincronizarPontoEvento = createServerFn({ method: "POST" })
 export const obterContextoPonto = createServerFn({ method: "GET" })
   .validator((input: unknown) => tokenSchema.parse(input))
   .handler(async ({ data }) => {
-    return invokePontoEdge({ action: "contexto", token: data.token }, contextoSchema);
+    return invokePontoEdge(
+      { action: "contexto", token: tokenQrParaEdge(data.token) },
+      contextoSchema,
+    );
   });
 
 export const identificarNoPonto = createServerFn({ method: "POST" })
   .validator((input: unknown) => identificarSchema.parse(input))
   .handler(async ({ data }) => {
-    return invokePontoEdge({ action: "identificar", ...data }, identificacaoResultSchema);
+    return invokePontoEdge(
+      { action: "identificar", ...data, token: tokenQrParaEdge(data.token) },
+      identificacaoResultSchema,
+    );
   });
 
 export const confirmarPresenca = createServerFn({ method: "POST" })
   .validator((input: unknown) => identificarSchema.parse(input))
   .handler(async ({ data }) => {
-    return invokePontoEdge({ action: "confirmar", ...data }, z.object({ ok: z.literal(true) }));
+    return invokePontoEdge(
+      { action: "confirmar", ...data, token: tokenQrParaEdge(data.token) },
+      z.object({ ok: z.literal(true) }),
+    );
   });
 
 export const registrarPonto = createServerFn({ method: "POST" })
@@ -305,7 +324,7 @@ export const registrarPonto = createServerFn({ method: "POST" })
     // O Edge Function aplica rate limit, valida tenant/assinatura/QR e grava
     // a marcação. Não há fallback direto com service_role.
     return invokePontoEdge(
-      { action: "registrar", ...data },
+      { action: "registrar", ...data, token: tokenQrParaEdge(data.token) },
       z.object({ ok: z.literal(true), foraHorario: z.boolean() }),
     );
   });
