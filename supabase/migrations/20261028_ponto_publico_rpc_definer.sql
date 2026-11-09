@@ -193,7 +193,7 @@ BEGIN
   SELECT id, nome
   INTO v_freelancer
   FROM public.freelancers
-  WHERE empresa_id = v_evento.empresa_id AND regexp_replace(cpf, '\D', '', 'g') = v_cpf_limpo;
+  WHERE empresa_id = v_evento.empresa_id AND ativo AND regexp_replace(cpf, '\D', '', 'g') = v_cpf_limpo;
 
   IF NOT FOUND THEN
     RAISE EXCEPTION 'Colaborador com este CPF não encontrado nesta agência.';
@@ -299,7 +299,7 @@ BEGIN
     RAISE EXCEPTION 'Tipo de ponto inválido.';
   END IF;
 
-  SELECT id, empresa_id, status, data_fim, qr_code_expira_em, qr_code_gerado_em, criado_em
+  SELECT id, empresa_id, status, data_inicio, data_fim, qr_code_expira_em, qr_code_gerado_em, criado_em
   INTO v_evento
   FROM public.eventos
   WHERE qr_code_token = _token;
@@ -336,7 +336,7 @@ BEGIN
   SELECT id, nome
   INTO v_freelancer
   FROM public.freelancers
-  WHERE empresa_id = v_evento.empresa_id AND regexp_replace(cpf, '\D', '', 'g') = v_cpf_limpo;
+  WHERE empresa_id = v_evento.empresa_id AND ativo AND regexp_replace(cpf, '\D', '', 'g') = v_cpf_limpo;
 
   IF NOT FOUND THEN
     RAISE EXCEPTION 'Colaborador não encontrado.';
@@ -353,6 +353,10 @@ BEGIN
 
   IF NOT FOUND THEN
     RAISE EXCEPTION 'Escala inválida para este colaborador.';
+  END IF;
+
+  IF v_escala.status = 'recusado' THEN
+    RAISE EXCEPTION 'Sua participação neste evento foi recusada.';
   END IF;
 
   SELECT checkin_exige_selfie, checkin_exige_gps, selfie_retencao_dias
@@ -398,7 +402,8 @@ BEGIN
     RAISE EXCEPTION 'O próximo registro deve ser %.', replace(v_esperado, '_', ' ');
   END IF;
 
-  IF v_evento.data_fim IS NOT NULL AND v_agora > v_evento.data_fim THEN
+  IF (v_evento.data_inicio IS NOT NULL AND v_agora < v_evento.data_inicio)
+     OR (v_evento.data_fim IS NOT NULL AND v_agora > v_evento.data_fim) THEN
     v_fora_horario := true;
   END IF;
 
