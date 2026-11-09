@@ -64,8 +64,8 @@ AS $$
   WHERE p.id = _pagamento_id;
 $$;
 
-REVOKE ALL ON FUNCTION public.empresa_do_pagamento(uuid) FROM public, anon;
-GRANT EXECUTE ON FUNCTION public.empresa_do_pagamento(uuid) TO authenticated, service_role;
+REVOKE ALL ON FUNCTION public.empresa_do_pagamento(uuid) FROM public, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.empresa_do_pagamento(uuid) TO service_role;
 
 -- 4. RPC: Bloqueio e transição atômica de pagamento para 'processando' com validação estrita de tenant
 CREATE OR REPLACE FUNCTION public.iniciar_processamento_pagamento_pix(_pagamento_id uuid)
@@ -352,9 +352,9 @@ $$;
 
 -- 7. Revogação de privilégios públicos e concessão exclusiva a autenticados autorizados e service_role
 REVOKE ALL ON FUNCTION public.iniciar_processamento_pagamento_pix(uuid) FROM public, anon;
-REVOKE ALL ON FUNCTION public.efetivar_pagamento_pix_db(uuid, uuid, text, text, timestamptz, text, text, text) FROM public, anon;
-REVOKE ALL ON FUNCTION public.reverter_transferencia_pagamento_pix(uuid, text, text, text) FROM public, anon;
+REVOKE ALL ON FUNCTION public.efetivar_pagamento_pix_db(uuid, uuid, text, text, timestamptz, text, text, text) FROM public, anon, authenticated;
+REVOKE ALL ON FUNCTION public.reverter_transferencia_pagamento_pix(uuid, text, text, text) FROM public, anon, authenticated;
 
 GRANT EXECUTE ON FUNCTION public.iniciar_processamento_pagamento_pix(uuid) TO authenticated, service_role;
-GRANT EXECUTE ON FUNCTION public.efetivar_pagamento_pix_db(uuid, uuid, text, text, timestamptz, text, text, text) TO authenticated, service_role;
-GRANT EXECUTE ON FUNCTION public.reverter_transferencia_pagamento_pix(uuid, text, text, text) TO authenticated, service_role;
+GRANT EXECUTE ON FUNCTION public.efetivar_pagamento_pix_db(uuid, uuid, text, text, timestamptz, text, text, text) TO service_role;
+GRANT EXECUTE ON FUNCTION public.reverter_transferencia_pagamento_pix(uuid, text, text, text) TO service_role;
