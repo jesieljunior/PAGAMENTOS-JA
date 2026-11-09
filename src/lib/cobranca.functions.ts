@@ -611,8 +611,7 @@ export const selecionarPlanoEmpresa = createServerFn({ method: "POST" })
           );
         }
 
-        const { buscarCobrancaPorReferencia, obterPixQrCode } =
-          await import("./asaas.server");
+        const { buscarCobrancaPorReferencia, obterPixQrCode } = await import("./asaas.server");
         const resultadoBusca = await buscarCobrancaPorReferencia(faturaPendente.id);
         const cobrancasEncontradas = resultadoBusca.data ?? [];
 
