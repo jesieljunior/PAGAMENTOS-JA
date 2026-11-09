@@ -717,3 +717,32 @@ REVOKE ALL ON FUNCTION public.liquidar_fatura_plataforma_asaas(uuid, text, numer
   FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.liquidar_fatura_plataforma_asaas(uuid, text, numeric)
   TO service_role;
+
+
+-- Funções de trigger SECURITY DEFINER não são endpoints RPC.
+-- Revoga execução direta por papéis da API; os triggers existentes continuam
+-- invocando essas funções como parte das operações autorizadas nas tabelas.
+DO $$
+DECLARE
+  f record;
+BEGIN
+  FOR f IN
+    SELECT p.oid::regprocedure AS signature
+    FROM pg_proc p
+    JOIN pg_namespace n ON n.oid = p.pronamespace
+    WHERE n.nspname = 'public'
+      AND p.prorettype = 'trigger'::regtype
+      AND p.proname IN (
+        'tg_impedir_duplo_acesso_papel',
+        'validar_funding_mesma_empresa',
+        'validar_movimento_mesma_empresa',
+        'validar_taxa_mesma_empresa'
+      )
+  LOOP
+    EXECUTE format(
+      'REVOKE ALL ON FUNCTION %s FROM PUBLIC, anon, authenticated',
+      f.signature
+    );
+  END LOOP;
+END;
+$$;
