@@ -498,3 +498,13 @@ SET public = false,
     file_size_limit = 5242880,
     allowed_mime_types = ARRAY['image/jpeg', 'image/png', 'image/webp']
 WHERE id = 'selfies-ponto';
+
+-- Leitura de evidências apenas por quem supervisiona a operação da própria empresa.
+DROP POLICY IF EXISTS "selfies_select_empresa" ON storage.objects;
+CREATE POLICY "selfies_select_empresa" ON storage.objects
+  FOR SELECT TO authenticated
+  USING (
+    bucket_id = 'selfies-ponto'
+    AND (storage.foldername(name))[1] = public.empresa_atual()::text
+    AND public.tem_capacidade(auth.uid(), 'operacao.supervisionar')
+  );
