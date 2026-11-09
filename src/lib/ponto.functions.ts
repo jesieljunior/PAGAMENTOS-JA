@@ -732,28 +732,24 @@ export const registrarPonto = createServerFn({ method: "POST" })
       const supabase = createSupabasePublicClient();
       let fotoUrl: string | null = null;
       if (data.fotoBase64) {
-        try {
-          const partesFoto = /^data:image\/(jpeg|png|webp);base64,([A-Za-z0-9+/=]+)$/.exec(
-            data.fotoBase64,
-          );
-          if (partesFoto) {
-            const formato = partesFoto[1];
-            const bytes = Uint8Array.from(Buffer.from(partesFoto[2]!, "base64"));
-            const caminho = `publico/${data.escalaId}/${crypto.randomUUID()}.${formato === "jpeg" ? "jpg" : formato}`;
-            const { error: erroUpload } = await supabase.storage
-              .from("selfies-ponto")
-              .upload(caminho, bytes, { contentType: `image/${formato}`, upsert: false });
-            if (!erroUpload) {
-              fotoUrl = caminho;
-            } else {
-              fotoUrl = data.fotoBase64;
-            }
-          } else {
-            fotoUrl = data.fotoBase64;
-          }
-        } catch {
-          fotoUrl = data.fotoBase64;
+        const partesFoto = /^data:image\/(jpeg|png|webp);base64,([A-Za-z0-9+/=]+)$/.exec(
+          data.fotoBase64,
+        );
+        if (!partesFoto) {
+          throw new Error("A selfie deve estar em JPEG, PNG ou WebP.");
         }
+
+        const formato = partesFoto[1]!;
+        const bytes = Uint8Array.from(Buffer.from(partesFoto[2]!, "base64"));
+        const caminho = `publico/${data.escalaId}/${crypto.randomUUID()}.${formato === "jpeg" ? "jpg" : formato}`;
+        const { error: erroUpload } = await supabase.storage
+          .from("selfies-ponto")
+          .upload(caminho, bytes, { contentType: `image/${formato}`, upsert: false });
+
+        if (erroUpload) {
+          throw new Error("Não foi possível armazenar a selfie. Nenhuma marcação foi registrada.");
+        }
+        fotoUrl = caminho;
       }
 
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
