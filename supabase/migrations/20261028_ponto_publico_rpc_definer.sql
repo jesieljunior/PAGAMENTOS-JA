@@ -507,6 +507,15 @@ AS $$
       AND (_empresa_id IS NULL OR e.empresa_id::text = _empresa_id)
       AND s.status NOT IN ('recusado', 'substituido')
       AND e.status NOT IN ('fechamento', 'pagamento', 'concluido', 'arquivado', 'cancelado')
+      AND (
+        (e.qr_code_expira_em IS NOT NULL
+          AND (
+            now() <= e.qr_code_expira_em
+            OR now() - COALESCE(e.qr_code_gerado_em, e.criado_em) <= interval '12 hours'
+          ))
+        OR (e.qr_code_expira_em IS NULL
+          AND (e.data_fim IS NULL OR now() <= e.data_fim + interval '12 hours'))
+      )
       AND em.ativa
       AND (
         a.status = 'ativa'
