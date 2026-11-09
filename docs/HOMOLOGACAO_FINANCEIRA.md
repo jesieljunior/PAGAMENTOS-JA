@@ -115,6 +115,8 @@ A sincronização de participações mantém a regra operacional: remoção/subs
 
 A migration `20261104130000` agora verifica duplicidades de débito/crédito por pagamento antes de criar os índices únicos. A migration final também verifica duplicidade de crédito por cobrança e referências Asaas repetidas. A RPC de funding não restaura saldo já reservado/consumido; ela confere o crédito histórico por empresa e valor. A RPC de Pix preserva estados terminais contra atualizações concorrentes antigas e confere os lançamentos existentes antes de considerá-los idempotentes. Nenhum lançamento é removido automaticamente.
 
+As funções `SECURITY DEFINER` deste conjunto de migrations usam `search_path` explícito com `pg_catalog` e `pg_temp` por último, reduzindo risco de resolução de objetos temporários controlados pelo chamador.
+
 A migration final também ajusta a auditoria para permitir `ator_id = NULL` exclusivamente em eventos automáticos (`ator_contexto = 'sistema'`). Ações atribuídas a usuários continuam exigindo identificador de ator. O identificador do recurso é gravado como UUID, e os resultados de auditoria respeitam os valores aceitos (`sucesso` e `falha`).
 
 **Importante:** o banco de teste consultado ainda não possui `faturas_plataforma` e não apresenta os três novos estados de `status_pagamento`. Portanto, ele ainda não está pronto para receber somente a migration final. Não avance para produção.
