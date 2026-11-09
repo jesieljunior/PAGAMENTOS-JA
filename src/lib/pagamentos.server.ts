@@ -132,41 +132,22 @@ export async function enviarPix(supabase: any, pagamentoId: string, empresaId?: 
       throw new Error("Configuração administrativa do Supabase ausente; Pix não foi enviado.");
     }
 
-    // 1. Bloqueio de concorrência ainda usa a sessão do usuário para validar tenant/capacidade.
-    let travaRpcAdquirida = false;
-    try {
-      const { data: rpcTrava, error: errRpcTrava } = await supabase.rpc(
-        "iniciar_processamento_pagamento_pix",
-        { _pagamento_id: pagamento.id },
+    // A reserva do pagamento é obrigatória. Se a RPC segura não existir ou
+    // falhar, o fluxo deve parar; nunca atualize o status diretamente como fallback.
+    const { data: rpcTrava, error: errRpcTrava } = await supabase.rpc(
+      "iniciar_processamento_pagamento_pix",
+      { _pagamento_id: pagamento.id },
+    );
+    if (errRpcTrava) {
+      throw new Error(
+        `Não foi possível reservar o pagamento com segurança: ${errRpcTrava.message}`,
       );
-      if (!errRpcTrava && rpcTrava && typeof rpcTrava === "object") {
-        if (!rpcTrava.ok) throw new Error(rpcTrava.erro || "Pagamento já em processamento.");
-        travaRpcAdquirida = true;
-      }
-    } catch (e) {
-      if (
-        e instanceof Error &&
-        !e.message.includes("function") &&
-        !e.message.includes("does not exist")
-      ) {
-        throw e;
-      }
     }
-
-    if (!travaRpcAdquirida) {
-      const { data: pagamentoLock, error: errLock } = await supabase
-        .from("pagamentos")
-        .update({ status: "processando", atualizado_em: new Date().toISOString() })
-        .eq("id", pagamento.id)
-        .in("status", ["pendente", "agendado", "falhou"])
-        .select("id")
-        .maybeSingle();
-
-      if (errLock || !pagamentoLock) {
-        throw new Error(
-          "Pagamento já está sendo processado por outra solicitação ou não está pendente.",
-        );
-      }
+    if (!rpcTrava || typeof rpcTrava !== "object" || !rpcTrava.ok) {
+      throw new Error(
+        (rpcTrava && typeof rpcTrava === "object" && "erro" in rpcTrava && rpcTrava.erro) ||
+          "Pagamento já está sendo processado ou não está em estado permitido.",
+      );
     }
     travaAdquirida = true;
 
