@@ -196,16 +196,19 @@ create policy "movimentos_financeiro_escrita" on public.movimentos_saldo for all
   with check (empresa_id = public.empresa_atual() and public.tem_capacidade(auth.uid(),'financeiro.gerenciar'));
 
 -- Reforço de fechamento/pagamento: leitura e escrita permanecem restritas à empresa e à capacidade.
+drop policy if exists "fechamentos_financeiro_escrita" on public.fechamentos;
 create policy "fechamentos_financeiro_escrita" on public.fechamentos
   for update to authenticated
   using (public.empresa_da_escala(escala_id) = public.empresa_atual() and public.tem_capacidade(auth.uid(),'financeiro.gerenciar'))
   with check (public.empresa_da_escala(escala_id) = public.empresa_atual() and public.tem_capacidade(auth.uid(),'financeiro.gerenciar'));
 
+drop policy if exists "pagamentos_financeiro_escrita_forte" on public.pagamentos;
 create policy "pagamentos_financeiro_escrita_forte" on public.pagamentos
   for update to authenticated
   using (public.empresa_do_fechamento(fechamento_id) = public.empresa_atual() and public.tem_capacidade(auth.uid(),'financeiro.gerenciar'))
   with check (public.empresa_do_fechamento(fechamento_id) = public.empresa_atual() and public.tem_capacidade(auth.uid(),'financeiro.gerenciar'));
 
+drop policy if exists "fundings_financeiro_escrita_forte" on public.fundings;
 create policy "fundings_financeiro_escrita_forte" on public.fundings
   for update to authenticated
   using (empresa_id = public.empresa_atual() and public.tem_capacidade(auth.uid(),'financeiro.gerenciar'))
