@@ -804,15 +804,52 @@ CREATE OR REPLACE FUNCTION public.tg_freelancers_limite_clt() RETURNS trigger LA
 END; $$;
 ALTER TABLE public.pontos ADD COLUMN IF NOT EXISTS evidencia_expira_em timestamptz;
 UPDATE public.pontos SET evidencia_expira_em=coalesce(selfie_expira_em,registrado_em+interval '90 days') WHERE foto_url IS NOT NULL OR gps_lat IS NOT NULL OR gps_lng IS NOT NULL;
-CREATE OR REPLACE FUNCTION public.tg_ponto_evidencias_plano() RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER SET search_path=public AS $$ DECLARE p public.planos; dias int; v_empresa uuid; BEGIN
- v_empresa:=public.empresa_da_escala(NEW.escala_id); p:=public.plano_da_empresa(v_empresa);
- SELECT least(coalesce(p.retencao_evidencias_dias,365),coalesce(c.selfie_retencao_dias,90)) INTO dias FROM public.configuracoes c WHERE c.empresa_id=v_empresa;
- dias:=coalesce(dias,p.retencao_evidencias_dias,90);
- IF NEW.foto_url IS NOT NULL OR NEW.gps_lat IS NOT NULL OR NEW.gps_lng IS NOT NULL THEN NEW.evidencia_expira_em:=NEW.registrado_em+make_interval(days=>dias); END IF;
- IF NEW.foto_url IS NOT NULL THEN NEW.selfie_expira_em:=NEW.evidencia_expira_em; END IF; RETURN NEW;
-END; $$;
+CREATE OR REPLACE FUNCTION public.tg_ponto_evidencias_plano()
+RETURNS trigger
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $
+DECLARE
+  p public.planos;
+  dias integer;
+  v_empresa uuid;
+BEGIN
+  v_empresa := public.empresa_da_escala(NEW.escala_id);
+  p := public.plano_da_empresa(v_empresa);
+
+  SELECT LEAST(
+    COALESCE(p.retencao_evidencias_dias, 365),
+    COALESCE(c.selfie_retencao_dias, 90)
+  )
+  INTO dias
+  FROM public.configuracoes c
+  WHERE c.empresa_id = v_empresa;
+
+  dias := COALESCE(dias, p.retencao_evidencias_dias, 90);
+
+  IF NEW.foto_url IS NOT NULL OR NEW.gps_lat IS NOT NULL OR NEW.gps_lng IS NOT NULL THEN
+    NEW.evidencia_expira_em := NEW.registrado_em + make_interval(days => dias);
+  ELSE
+    NEW.evidencia_expira_em := NULL;
+  END IF;
+
+  IF NEW.foto_url IS NOT NULL THEN
+    NEW.selfie_expira_em := NEW.evidencia_expira_em;
+  ELSE
+    NEW.selfie_expira_em := NULL;
+  END IF;
+
+  RETURN NEW;
+END;
+$;
+
 DROP TRIGGER IF EXISTS tg_ponto_evidencias_plano ON public.pontos;
-CREATE TRIGGER tg_ponto_evidencias_plano BEFORE INSERT ON public.pontos FOR EACH ROW EXECUTE FUNCTION public.tg_ponto_evidencias_plano();
+CREATE TRIGGER tg_ponto_evidencias_plano
+  BEFORE INSERT OR UPDATE OF foto_url, gps_lat, gps_lng, escala_id
+  ON public.pontos
+  FOR EACH ROW
+  EXECUTE FUNCTION public.tg_ponto_evidencias_plano();
 CREATE OR REPLACE FUNCTION public.validar_sequencia_novo_ponto() RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER SET search_path=public AS $$ DECLARE tipos tipo_ponto[]; esperado tipo_ponto; p public.planos; BEGIN
  IF NEW.status='recusado' THEN RETURN NEW; END IF;
  PERFORM pg_advisory_xact_lock(hashtext('ponto:'||NEW.escala_id::text));
