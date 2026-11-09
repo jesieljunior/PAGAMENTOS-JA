@@ -73,6 +73,22 @@ BEGIN
     RETURN NULL;
   END IF;
 
+  IF v_evento.status IN ('fechamento', 'pagamento', 'concluido', 'arquivado', 'cancelado')
+     OR NOT EXISTS (
+       SELECT 1 FROM public.empresas e
+       WHERE e.id = v_evento.empresa_id AND e.ativa
+     )
+     OR NOT EXISTS (
+       SELECT 1 FROM public.assinaturas a
+       WHERE a.empresa_id = v_evento.empresa_id
+         AND (
+           a.status = 'ativa'
+           OR (a.status IN ('trial', 'em_trial') AND a.trial_ate > v_agora)
+         )
+     ) THEN
+    RETURN NULL;
+  END IF;
+
   -- Validação de expiração com janela de tolerância de 12 horas
   IF v_evento.qr_code_expira_em IS NOT NULL THEN
     IF v_agora > v_evento.qr_code_expira_em THEN
@@ -139,7 +155,7 @@ BEGIN
     RAISE EXCEPTION 'CPF deve conter exatamente 11 dígitos.';
   END IF;
 
-  SELECT id, empresa_id, data_inicio, data_fim, qr_code_expira_em, qr_code_gerado_em, criado_em
+  SELECT id, empresa_id, status, data_inicio, data_fim, qr_code_expira_em, qr_code_gerado_em, criado_em
   INTO v_evento
   FROM public.eventos
   WHERE qr_code_token = _token;
@@ -148,11 +164,30 @@ BEGIN
     RAISE EXCEPTION 'QR Code inválido ou não encontrado.';
   END IF;
 
+  IF v_evento.status IN ('fechamento', 'pagamento', 'concluido', 'arquivado', 'cancelado')
+     OR NOT EXISTS (
+       SELECT 1 FROM public.empresas e
+       WHERE e.id = v_evento.empresa_id AND e.ativa
+     )
+     OR NOT EXISTS (
+       SELECT 1 FROM public.assinaturas a
+       WHERE a.empresa_id = v_evento.empresa_id
+         AND (
+           a.status = 'ativa'
+           OR (a.status IN ('trial', 'em_trial') AND a.trial_ate > v_agora)
+         )
+     ) THEN
+    RAISE EXCEPTION 'Evento ou assinatura indisponível para registro público de ponto.';
+  END IF;
+
   -- Validação de expiração
-  IF v_evento.qr_code_expira_em IS NOT NULL AND v_agora > v_evento.qr_code_expira_em THEN
-    IF v_agora - COALESCE(v_evento.qr_code_gerado_em, v_evento.criado_em) > interval '12 hours' THEN
+  IF v_evento.qr_code_expira_em IS NOT NULL THEN
+    IF v_agora > v_evento.qr_code_expira_em
+       AND v_agora - COALESCE(v_evento.qr_code_gerado_em, v_evento.criado_em) > interval '12 hours' THEN
       RAISE EXCEPTION 'Este QR Code está expirado.';
     END IF;
+  ELSIF v_evento.data_fim IS NOT NULL AND v_agora > v_evento.data_fim + interval '12 hours' THEN
+    RAISE EXCEPTION 'Este QR Code está expirado.';
   END IF;
 
   SELECT id, nome
@@ -264,13 +299,38 @@ BEGIN
     RAISE EXCEPTION 'Tipo de ponto inválido.';
   END IF;
 
-  SELECT id, empresa_id, data_fim, qr_code_expira_em, qr_code_gerado_em, criado_em
+  SELECT id, empresa_id, status, data_fim, qr_code_expira_em, qr_code_gerado_em, criado_em
   INTO v_evento
   FROM public.eventos
   WHERE qr_code_token = _token;
 
   IF NOT FOUND THEN
     RAISE EXCEPTION 'QR Code inválido.';
+  END IF;
+
+  IF v_evento.status IN ('fechamento', 'pagamento', 'concluido', 'arquivado', 'cancelado')
+     OR NOT EXISTS (
+       SELECT 1 FROM public.empresas e
+       WHERE e.id = v_evento.empresa_id AND e.ativa
+     )
+     OR NOT EXISTS (
+       SELECT 1 FROM public.assinaturas a
+       WHERE a.empresa_id = v_evento.empresa_id
+         AND (
+           a.status = 'ativa'
+           OR (a.status IN ('trial', 'em_trial') AND a.trial_ate > v_agora)
+         )
+     ) THEN
+    RAISE EXCEPTION 'Evento ou assinatura indisponível para registro público de ponto.';
+  END IF;
+
+  IF v_evento.qr_code_expira_em IS NOT NULL THEN
+    IF v_agora > v_evento.qr_code_expira_em
+       AND v_agora - COALESCE(v_evento.qr_code_gerado_em, v_evento.criado_em) > interval '12 hours' THEN
+      RAISE EXCEPTION 'QR Code expirado.';
+    END IF;
+  ELSIF v_evento.data_fim IS NOT NULL AND v_agora > v_evento.data_fim + interval '12 hours' THEN
+    RAISE EXCEPTION 'QR Code expirado.';
   END IF;
 
   SELECT id, nome
