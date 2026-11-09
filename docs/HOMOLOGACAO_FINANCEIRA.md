@@ -90,6 +90,8 @@ A inspeção foi feita em modo somente leitura no projeto **JÁ - BANCO DE DADOS
 
 Não execute o conjunto de migrations como se o banco estivesse vazio. A migration Billing V2 foi ajustada para tolerar as duas tabelas de ponto já existentes e para substituir as policies que já estavam instaladas. A sequência final ainda depende da conferência de todas as estruturas anteriores e da validação do fluxo de faturamento.
 
+A sincronização de participações mantém a regra operacional: remoção/substituição antes do início do evento desativa a participação; depois do início, a participação confirmada é preservada para não apagar uso histórico. Evento cancelado desativa as participações.
+
 A migration `20261104130000` agora verifica duplicidades de débito/crédito por pagamento antes de criar os índices únicos. A migration final também verifica duplicidade de crédito por cobrança e referências Asaas repetidas. A RPC de funding não restaura saldo já reservado/consumido; ela confere o crédito histórico por empresa e valor. A RPC de Pix preserva estados terminais contra atualizações concorrentes antigas e confere os lançamentos existentes antes de considerá-los idempotentes. Nenhum lançamento é removido automaticamente.
 
 A migration final também ajusta a auditoria para permitir `ator_id = NULL` exclusivamente em eventos automáticos (`ator_contexto = 'sistema'`). Ações atribuídas a usuários continuam exigindo identificador de ator. O identificador do recurso é gravado como UUID, e os resultados de auditoria respeitam os valores aceitos (`sucesso` e `falha`).
