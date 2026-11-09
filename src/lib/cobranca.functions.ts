@@ -479,7 +479,12 @@ export const selecionarPlanoEmpresa = createServerFn({ method: "POST" })
         trial_ate: trialAte,
       };
 
-      let novaAssinatura: { id: string; plano_id: string | null; status: string; trial_ate: string | null } | null = null;
+      let novaAssinatura: {
+        id: string;
+        plano_id: string | null;
+        status: string;
+        trial_ate: string | null;
+      } | null = null;
       let erroCriacaoAssinatura: string | null = null;
 
       const resultadoCliente = await client
@@ -498,7 +503,7 @@ export const selecionarPlanoEmpresa = createServerFn({ method: "POST" })
         const resultadoAdmin = await admin
           .from("assinaturas")
           .insert(novaAssinaturaPayload)
-          .select("id, plano_id, status")
+          .select("id, plano_id, status, trial_ate")
           .maybeSingle();
 
         if (resultadoAdmin.error) {
