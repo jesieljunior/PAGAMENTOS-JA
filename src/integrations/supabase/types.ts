@@ -1548,7 +1548,6 @@ export type Database = {
       mercado_pago_contas: {
         Row: {
           access_token_cifrado: string;
-          client_secret_cifrado: string | null;
           atualizado_em: string;
           criado_em: string;
           empresa_id: string;
@@ -1561,7 +1560,6 @@ export type Database = {
         };
         Insert: {
           access_token_cifrado: string;
-          client_secret_cifrado?: string | null;
           atualizado_em?: string;
           criado_em?: string;
           empresa_id: string;
