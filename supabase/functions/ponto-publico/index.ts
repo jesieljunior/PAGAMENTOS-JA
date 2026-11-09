@@ -124,7 +124,7 @@ async function hash(value: string): Promise<string> {
   );
 }
 
-async function lerJsonLimitado(request: Request, limiteBytes = 6 * 1024 * 1024): Promise<unknown> {
+async function lerJsonLimitado(request: Request, limiteBytes = 8 * 1024 * 1024): Promise<unknown> {
   const tamanhoDeclarado = Number(request.headers.get("content-length"));
   if (Number.isFinite(tamanhoDeclarado) && tamanhoDeclarado > limiteBytes) {
     throw new RequestError("A requisição excede o limite de tamanho permitido.", 413);
@@ -356,7 +356,7 @@ async function registrar(supabase: AdminClient, input: Record<string, unknown>) 
   const tipoValido = tipo as TipoPonto;
   const fotoBase64 =
     typeof input.fotoBase64 === "string" && input.fotoBase64.length > 0
-      ? text(input.fotoBase64, "Selfie", 1, 4_000_000)
+      ? text(input.fotoBase64, "Selfie", 1, 7_000_000)
       : null;
   const lat = input.lat === null || input.lat === undefined ? null : Number(input.lat);
   const lng = input.lng === null || input.lng === undefined ? null : Number(input.lng);
