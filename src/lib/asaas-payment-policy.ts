@@ -17,3 +17,8 @@ export const EVENTOS_CREDITO_SALDO = new Set<string>(["PAYMENT_RECEIVED"]);
 export const STATUS_FATURA_SAAS = new Set<string>(["RECEIVED", "CONFIRMED"]);
 
 export const STATUS_CREDITO_SALDO = new Set<string>(["RECEIVED"]);
+
+/** Detecta a baixa manual externa, inclusive quando o evento recebido é PAYMENT_RECEIVED. */
+export function isRecebimentoManualEmDinheiro(billingType: unknown): boolean {
+  return typeof billingType === "string" && billingType.trim().toUpperCase() === "RECEIVED_IN_CASH";
+}
