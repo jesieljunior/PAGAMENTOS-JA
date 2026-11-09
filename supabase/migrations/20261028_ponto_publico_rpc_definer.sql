@@ -468,16 +468,16 @@ $$;
 
 -- Permissões de execução para qualquer cliente (anon, authenticated, service_role)
 REVOKE ALL ON FUNCTION public.obter_contexto_ponto_por_token(text) FROM PUBLIC;
-GRANT EXECUTE ON FUNCTION public.obter_contexto_ponto_por_token(text) TO anon, authenticated, service_role;
+GRANT EXECUTE ON FUNCTION public.obter_contexto_ponto_por_token(text) TO service_role;
 
 REVOKE ALL ON FUNCTION public.identificar_no_ponto_publico(text, text) FROM PUBLIC;
-GRANT EXECUTE ON FUNCTION public.identificar_no_ponto_publico(text, text) TO anon, authenticated, service_role;
+GRANT EXECUTE ON FUNCTION public.identificar_no_ponto_publico(text, text) TO service_role;
 
 REVOKE ALL ON FUNCTION public.confirmar_presenca_ponto_publico(text, text) FROM PUBLIC;
-GRANT EXECUTE ON FUNCTION public.confirmar_presenca_ponto_publico(text, text) TO anon, authenticated, service_role;
+GRANT EXECUTE ON FUNCTION public.confirmar_presenca_ponto_publico(text, text) TO service_role;
 
 REVOKE ALL ON FUNCTION public.registrar_ponto_publico(text, text, uuid, text, text, double precision, double precision, boolean) FROM PUBLIC;
-GRANT EXECUTE ON FUNCTION public.registrar_ponto_publico(text, text, uuid, text, text, double precision, double precision, boolean) TO anon, authenticated, service_role;
+GRANT EXECUTE ON FUNCTION public.registrar_ponto_publico(text, text, uuid, text, text, double precision, double precision, boolean) TO service_role;
 
 -- 5. Bucket de selfies e permissão de upload público
 INSERT INTO storage.buckets (id, name, public)
