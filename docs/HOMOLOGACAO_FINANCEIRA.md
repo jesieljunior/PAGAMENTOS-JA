@@ -118,6 +118,21 @@ A migration final também ajusta a auditoria para permitir `ator_id = NULL` excl
 
 **Importante:** o banco de teste consultado ainda não possui `faturas_plataforma` e não apresenta os três novos estados de `status_pagamento`. Portanto, ele ainda não está pronto para receber somente a migration final. Não avance para produção.
 
+### Pré-verificação das dependências de runtime
+
+Antes de publicar a Edge Function `ponto-publico`, confirme que as estruturas e RPCs chamadas por ela existem:
+
+```sql
+SELECT
+  to_regclass('public.faturas_plataforma') AS faturas_plataforma,
+  to_regclass('public.participacoes_operacionais') AS participacoes_operacionais,
+  to_regclass('public.ciclos_cobranca') AS ciclos_cobranca,
+  to_regprocedure('public.plano_da_empresa(uuid)') AS plano_da_empresa,
+  to_regprocedure('public.registrar_ponto_publico(text,text,uuid,text,text,double precision,double precision,boolean)') AS registrar_ponto_publico;
+```
+
+Resultado esperado após as migrations: nenhuma coluna `NULL`. Se qualquer dependência estiver ausente, não publique nem considere homologado o fluxo público de ponto.
+
 ## 3. Validar permissões das RPCs
 
 Execute no SQL Editor do projeto de homologação:
