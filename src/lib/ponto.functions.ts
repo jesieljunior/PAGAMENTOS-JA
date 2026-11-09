@@ -30,7 +30,7 @@ const evidenciaLivenessSchema = z
 const registrarSchema = identificarSchema.extend({
   escalaId: z.string().uuid(),
   tipo: z.enum(["entrada", "saida", "inicio_intervalo", "fim_intervalo"]),
-  fotoBase64: z.string().max(4_000_000).nullable().optional(),
+  fotoBase64: z.string().max(7_000_000).nullable().optional(),
   lat: z.number().nullable().optional(),
   lng: z.number().nullable().optional(),
   consentiuSelfie: z.boolean().optional(),
