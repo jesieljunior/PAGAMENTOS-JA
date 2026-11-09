@@ -315,11 +315,12 @@ export const Route = createFileRoute("/api/public/webhooks/asaas")({
           }
 
           if (evento === "PAYMENT_OVERDUE" && corpo.payment?.id) {
-            await supabaseAdmin
+            const { error: erroCobrancaVencida } = await supabaseAdmin
               .from("cobrancas")
               .update({ status: "vencido" })
               .eq("parceiro_cobranca_id", corpo.payment.id)
               .neq("status", "pago");
+            if (erroCobrancaVencida) throw erroCobrancaVencida;
 
             // Atualiza também faturas SaaS ainda não liquidadas.
             const atualizacaoFatura = {
@@ -330,18 +331,20 @@ export const Route = createFileRoute("/api/public/webhooks/asaas")({
             // O ID da cobrança Asaas pode ainda não estar gravado na fatura
             // quando o evento de vencimento chegar. externalReference é o ID
             // local da fatura e permite localizar o registro sem ambiguidade.
-            await supabaseAdmin
+            const { error: erroFaturaPorParceiro } = await supabaseAdmin
               .from("faturas_plataforma")
               .update(atualizacaoFatura)
               .eq("referencia_provedor", corpo.payment.id)
               .in("status", ["pendente", "atrasada"]);
+            if (erroFaturaPorParceiro) throw erroFaturaPorParceiro;
 
             if (corpo.payment.externalReference) {
-              await supabaseAdmin
+              const { error: erroFaturaPorReferencia } = await supabaseAdmin
                 .from("faturas_plataforma")
                 .update(atualizacaoFatura)
                 .eq("id", corpo.payment.externalReference)
                 .in("status", ["pendente", "atrasada"]);
+              if (erroFaturaPorReferencia) throw erroFaturaPorReferencia;
             }
           }
 
