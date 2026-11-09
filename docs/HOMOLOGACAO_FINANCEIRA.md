@@ -61,14 +61,18 @@ Resultado esperado: nenhuma linha. A migration final cria índices únicos parci
 
 Não aplique apenas as duas migrations finais isoladamente. A liquidação de faturas depende da tabela `faturas_plataforma`, criada na migration de Billing V2, e as RPCs de Pix dependem dos estados adicionais do enum `status_pagamento`.
 
-Confirme que todas as migrations anteriores do projeto foram aplicadas. Para este conjunto financeiro, a sequência de dependências é:
+Confirme que as migrations base anteriores foram aplicadas. As migrations `20261002000000_finance_rls_hardening.sql`, `20261002010000_webhook_eventos_idempotencia.sql` e `20261016000000_relax_financial_read_restriction_and_isolate_support.sql` fazem parte da base já existente e devem ser reconciliadas com o schema atual antes de qualquer reexecução.
+
+Para completar o schema de ponto e faturamento e depois aplicar as proteções financeiras, a sequência de arquivos deste escopo é:
 
 1. `20261020020000_billing_v2_and_timeclock_columns.sql` — cria `faturas_plataforma` e estruturas de faturamento V2.
-2. `20261104120000_status_pagamento_states.sql` — adiciona `processando`, `aguardando_aprovacao` e `estornado`.
-3. `20261104130000_financial_resilience_and_timeclock_audit.sql` — prepara estados, webhooks e RPCs de processamento.
-4. `20261104140000_finance_tenant_security_and_saas_invoicing.sql` — reforça isolamento de tenant e instala a liquidação inicial de faturas.
-5. `20261105130000_harden_saas_invoice_settlement.sql` — restringe a liquidação de faturas a `service_role`.
-6. `20261106130000_financial_integrity_hardening.sql` — instala as proteções transacionais finais para funding, Pix de saída, estornos e faturas SaaS.
+2. `20261027_ponto_publico_policies.sql` — instala a policy e a primeira versão do contexto público do QR Code.
+3. `20261028_ponto_publico_rpc_definer.sql` — instala as RPCs públicas de identificação, confirmação e registro de ponto.
+4. `20261104120000_status_pagamento_states.sql` — adiciona `processando`, `aguardando_aprovacao` e `estornado`.
+5. `20261104130000_financial_resilience_and_timeclock_audit.sql` — prepara estados, webhooks e RPCs de processamento.
+6. `20261104140000_finance_tenant_security_and_saas_invoicing.sql` — reforça isolamento de tenant e instala a liquidação inicial de faturas.
+7. `20261105130000_harden_saas_invoice_settlement.sql` — restringe a liquidação de faturas a `service_role`.
+8. `20261106130000_financial_integrity_hardening.sql` — instala as proteções transacionais finais para funding, Pix de saída, estornos e faturas SaaS.
 
 A migration final não configura nem altera credenciais do Mercado Pago. A aplicação está sendo homologada com Asaas.
 
@@ -80,6 +84,7 @@ A inspeção foi feita em modo somente leitura no projeto **JÁ - BANCO DE DADOS
 - O schema está parcialmente adiantado: `tentativas_ponto_publico`, `auditoria_ponto_publico` e as colunas de QR Code/evidência já existem.
 - As tabelas centrais do Billing V2 — `faturas_plataforma`, `participacoes_operacionais` e `ciclos_cobranca` — ainda não existem.
 - O enum `status_pagamento` ainda contém somente `pendente`, `agendado`, `executado` e `falhou`.
+- A RPC `obter_contexto_ponto_por_token` existe na versão simples da migration `20261027`; as RPCs adicionais de `20261028` (`identificar_no_ponto_publico`, `confirmar_presenca_ponto_publico` e `registrar_ponto_publico`) não foram encontradas.
 - As policies restritivas de leitura de fechamentos e pagamentos já existem, criadas por uma migration anterior. A migration Billing V2 foi ajustada para substituí-las sem erro.
 - A tabela `webhook_eventos` já existe e ainda possui a policy antiga de inserção por usuários autenticados. A migration de resiliência agora revoga esse acesso e reserva a escrita ao backend com `service_role`.
 
