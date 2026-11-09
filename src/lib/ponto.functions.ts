@@ -82,51 +82,20 @@ export function validarValidadeQr(evento: {
   criado_em?: string | null | undefined;
 }): string {
   const agora = Date.now();
+  const expira = evento.qr_code_expira_em
+    ? new Date(evento.qr_code_expira_em).getTime()
+    : evento.data_fim
+      ? new Date(evento.data_fim).getTime() + 12 * 60 * 60_000
+      : new Date(evento.qr_code_gerado_em ?? evento.criado_em ?? "").getTime() +
+        12 * 60 * 60_000;
 
-  // 1. Se tem data de expiração gravada
-  if (evento.qr_code_expira_em) {
-    const expira = new Date(evento.qr_code_expira_em).getTime();
-    if (Number.isFinite(expira)) {
-      if (agora <= expira) {
-        return evento.qr_code_expira_em;
-      }
-
-      // Janela de tolerância para eventos ou QR recém-criados/gerados nas últimas 12 horas
-      const gerado = evento.qr_code_gerado_em ? new Date(evento.qr_code_gerado_em).getTime() : 0;
-      const criado = evento.criado_em ? new Date(evento.criado_em).getTime() : 0;
-      const momentoRecente = Math.max(gerado, criado);
-      if (momentoRecente > 0 && agora - momentoRecente < 12 * 60 * 60_000) {
-        return new Date(momentoRecente + 12 * 60 * 60_000).toISOString();
-      }
-
-      throw new Error(
-        "Este QR Code está expirado. Peça ao supervisor para abrir o evento e clicar em 'Trocar QR'.",
-      );
-    }
-  }
-
-  // 2. Se tem data_fim
-  if (evento.data_fim) {
-    const fim = new Date(evento.data_fim).getTime();
-    const expira = fim + 12 * 60 * 60_000;
-    if (Number.isFinite(fim) && agora <= expira) {
-      return new Date(expira).toISOString();
-    }
-
-    const gerado = evento.qr_code_gerado_em ? new Date(evento.qr_code_gerado_em).getTime() : 0;
-    const criado = evento.criado_em ? new Date(evento.criado_em).getTime() : 0;
-    const momentoRecente = Math.max(gerado, criado);
-    if (momentoRecente > 0 && agora - momentoRecente < 12 * 60 * 60_000) {
-      return new Date(momentoRecente + 12 * 60 * 60_000).toISOString();
-    }
-
+  if (!Number.isFinite(expira) || agora > expira) {
     throw new Error(
       "Este QR Code está expirado. Peça ao supervisor para abrir o evento e clicar em 'Trocar QR'.",
     );
   }
 
-  // 3. Sem data de fim e sem qr_code_expira_em: válido por 24h a partir de agora
-  return new Date(agora + 24 * 60 * 60_000).toISOString();
+  return new Date(expira).toISOString();
 }
 
 function tokenQrParaEdge(token: string): string {
