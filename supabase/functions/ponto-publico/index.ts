@@ -387,7 +387,7 @@ async function registrar(supabase: AdminClient, input: Record<string, unknown>) 
       status: "pendente",
       fora_horario: foraHorario,
       selfie_consentimento_aceito_em: fotoBase64 ? agora.toISOString() : null,
-      selfie_expira_em: fotoBase64
+      selfie_expira_em: fotoBase64 || lat !== null || lng !== null
         ? new Date(agora.getTime() + retencaoDias * 24 * 60 * 60_000).toISOString()
         : null,
     })
