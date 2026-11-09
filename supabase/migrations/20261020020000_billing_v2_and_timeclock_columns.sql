@@ -731,7 +731,7 @@ WITH novos_ciclos AS (
   ) cp ON true
   WHERE a.status IN ('ativa','trial','em_trial','pendente','aguardando_pagamento')
   ON CONFLICT (empresa_id, inicio) DO NOTHING
-  RETURNING empresa_id
+  RETURNING empresa_id, inicio
 )
 UPDATE public.cupons cu
 SET usos=cu.usos+1
