@@ -27,7 +27,7 @@ BEGIN
 END;
 $$;
 
-DO $
+DO $$
 BEGIN
   IF EXISTS (
     SELECT 1
@@ -40,7 +40,7 @@ BEGIN
       'Há pagamentos com lançamentos contábeis duplicados. Reconcilie o ledger antes de aplicar a migration 20261106130000.';
   END IF;
 END;
-$;
+$$;
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_movimentos_saldo_cobranca_credito
   ON public.movimentos_saldo (cobranca_id)
