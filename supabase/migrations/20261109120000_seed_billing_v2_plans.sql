@@ -68,7 +68,7 @@ SET evidencia_expira_em = pt.registrado_em
             COALESCE(cfg.selfie_retencao_dias, 90),
             COALESCE(pl.retencao_evidencias_dias, 365)
           ))
-      ELSE pt.selfie_expira_em
+      ELSE NULL
     END
 FROM public.escalas s
 JOIN public.equipes eq ON eq.id = s.equipe_id
@@ -77,6 +77,5 @@ LEFT JOIN public.configuracoes cfg ON cfg.empresa_id = ev.empresa_id
 LEFT JOIN public.assinaturas a ON a.empresa_id = ev.empresa_id
 LEFT JOIN public.planos pl ON pl.id = a.plano_id
 WHERE pt.escala_id = s.id
-  AND pt.evidencia_expira_em IS NULL
   AND (pt.foto_url IS NOT NULL OR pt.gps_lat IS NOT NULL OR pt.gps_lng IS NOT NULL);
 
