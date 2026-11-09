@@ -9,6 +9,7 @@ import { z } from "zod";
 
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { requireOrganizationContext } from "@/lib/autorizacao.server";
+import { isRecebimentoManualEmDinheiro } from "@/lib/asaas-payment-policy";
 
 const cobrancaSchema = z.object({
   clienteId: z.string().uuid(),
@@ -155,6 +156,14 @@ export const sincronizarCobranca = createServerFn({ method: "POST" })
 
     const { obterCobrancaAsaas } = await import("./asaas.server");
     const remota = await obterCobrancaAsaas(cobranca.parceiro_cobranca_id);
+    if (!remota.billingType) {
+      throw new Error("Asaas não retornou billingType para a cobrança operacional.");
+    }
+    if (isRecebimentoManualEmDinheiro(remota.billingType)) {
+      throw new Error(
+        "Recebimento manual em dinheiro não disponibiliza saldo no Asaas e exige conciliação manual.",
+      );
+    }
     if (
       remota.id !== cobranca.parceiro_cobranca_id ||
       remota.externalReference !== cobranca.id ||
@@ -164,8 +173,8 @@ export const sincronizarCobranca = createServerFn({ method: "POST" })
       throw new Error("Cobrança do Asaas não corresponde ao registro ou ao valor esperado.");
     }
 
-    // CONFIRMED significa pagamento efetuado, mas não necessariamente saldo disponível.
-    if (!["RECEIVED", "RECEIVED_IN_CASH"].includes(remota.status)) {
+    // Só PAYMENT_RECEIVED com saldo disponível pode liberar funding operacional.
+    if (remota.status !== "RECEIVED") {
       return { status: remota.status };
     }
 
