@@ -55,7 +55,7 @@ CREATE OR REPLACE FUNCTION public.obter_contexto_ponto_por_token(_token text)
 RETURNS jsonb
 LANGUAGE plpgsql
 SECURITY DEFINER
-SET search_path = pg_catalog, public
+SET search_path = pg_catalog, public, pg_temp
 AS $$
 DECLARE
   v_evento record;
@@ -141,7 +141,7 @@ CREATE OR REPLACE FUNCTION public.identificar_no_ponto_publico(_token text, _cpf
 RETURNS jsonb
 LANGUAGE plpgsql
 SECURITY DEFINER
-SET search_path = pg_catalog, public
+SET search_path = pg_catalog, public, pg_temp
 AS $$
 DECLARE
   v_evento record;
@@ -245,7 +245,7 @@ CREATE OR REPLACE FUNCTION public.confirmar_presenca_ponto_publico(_token text, 
 RETURNS jsonb
 LANGUAGE plpgsql
 SECURITY DEFINER
-SET search_path = pg_catalog, public
+SET search_path = pg_catalog, public, pg_temp
 AS $$
 DECLARE
   v_res jsonb;
@@ -278,7 +278,7 @@ CREATE OR REPLACE FUNCTION public.registrar_ponto_publico(
 RETURNS jsonb
 LANGUAGE plpgsql
 SECURITY DEFINER
-SET search_path = pg_catalog, public
+SET search_path = pg_catalog, public, pg_temp
 AS $$
 DECLARE
   v_evento record;
