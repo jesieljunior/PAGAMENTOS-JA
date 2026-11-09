@@ -53,7 +53,9 @@ GROUP BY referencia_provedor
 HAVING COUNT(*) > 1;
 ```
 
-Resultado esperado: nenhuma linha. A migration cria índices únicos parciais para impedir que um mesmo pagamento Asaas seja associado a duas cobranças operacionais ou duas faturas SaaS.
+A consulta de `cobrancas` pode ser executada antes da Billing V2. A consulta de `faturas_plataforma` só deve ser executada depois da migration `20261020020000`, que cria essa tabela, e antes da migration final.
+
+Resultado esperado: nenhuma linha. A migration final cria índices únicos parciais para impedir que um mesmo pagamento Asaas seja associado a duas cobranças operacionais ou duas faturas SaaS.
 
 ## 2. Pré-requisitos e ordem das migrations
 
