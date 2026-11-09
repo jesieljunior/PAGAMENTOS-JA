@@ -265,7 +265,7 @@ BEGIN
     -- consumo e estornos, mas completa a referência do provedor se ausente.
     UPDATE public.fundings
     SET status = CASE
-          WHEN v_movimento.id IS NULL OR v_funding.status = 'pending' THEN 'available'
+          WHEN v_movimento.id IS NULL OR v_funding.status = 'pending' THEN 'available'::public.status_funding
           ELSE status
         END,
         valor_disponivel = CASE
