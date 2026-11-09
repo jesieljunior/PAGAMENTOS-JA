@@ -1445,7 +1445,7 @@ export type Database = {
         Row: {
           acao: string;
           ator_contexto: string;
-          ator_id: string;
+          ator_id: string | null;
           criado_em: string;
           detalhes: Json;
           empresa_id: string | null;
@@ -1457,7 +1457,7 @@ export type Database = {
         Insert: {
           acao: string;
           ator_contexto: string;
-          ator_id: string;
+          ator_id?: string | null;
           criado_em?: string;
           detalhes?: Json;
           empresa_id?: string | null;
@@ -1469,7 +1469,7 @@ export type Database = {
         Update: {
           acao?: string;
           ator_contexto?: string;
-          ator_id?: string;
+          ator_id?: string | null;
           criado_em?: string;
           detalhes?: Json;
           empresa_id?: string | null;

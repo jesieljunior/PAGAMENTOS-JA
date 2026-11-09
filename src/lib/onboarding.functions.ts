@@ -65,43 +65,66 @@ export const concluirCadastroComEmpresaEPlano = createServerFn({ method: "POST" 
     }
 
     // 3. Identifica plano escolhido
-    const planoEscolhido =
-      PLANOS_CATALOGO.find((p) => p.codigo === data.planoCodigo) || PLANOS_CATALOGO[0]!;
+    const planoCatalogo =
+      PLANOS_CATALOGO.find((p) => p.id === data.planoId || p.codigo === data.planoCodigo) ||
+      PLANOS_CATALOGO[0]!;
+    const { data: planoPersistido, error: erroPlano } = await db
+      .from("planos")
+      .select("id, codigo, nome, mensalidade, dias_trial")
+      .eq("codigo", planoCatalogo.codigo)
+      .eq("ativo", true)
+      .maybeSingle();
 
+    if (erroPlano || !planoPersistido) {
+      throw new Error(
+        "O catálogo de planos ainda não está sincronizado no banco. Conclua as migrations de Billing V2 antes do onboarding.",
+      );
+    }
+
+    const planoEscolhido = { ...planoCatalogo, ...planoPersistido };
     const ehGratuito = planoEscolhido.codigo === "free" || planoEscolhido.mensalidade === 0;
 
-    // Se o plano for o gratuito, aplica exatamente 7 dias de trial
-    const trialAte = ehGratuito ? calcularDataFimTrial(DIAS_TRIAL_PADRAO) : null;
-
-    // 4. Cria ou atualiza assinatura
-    const { data: assinaturaExistente } = await db
+    // 4. Cria ou atualiza assinatura. O trial não pode ser reiniciado ao
+    // repetir o onboarding ou selecionar novamente o plano gratuito.
+    const { data: assinaturaExistente, error: erroConsultaAssinatura } = await db
       .from("assinaturas")
-      .select("id")
+      .select("id, trial_ate")
       .eq("empresa_id", empresaId)
       .maybeSingle();
 
+    if (erroConsultaAssinatura) {
+      throw new Error("Não foi possível consultar a assinatura atual da agência.");
+    }
+
+    const trialAte = ehGratuito
+      ? assinaturaExistente
+        ? assinaturaExistente.trial_ate
+        : calcularDataFimTrial(DIAS_TRIAL_PADRAO)
+      : null;
+
+    const dadosAssinatura = {
+      plano_id: planoEscolhido.id,
+      status: ehGratuito ? "trial" : "pendente",
+      trial_ate: trialAte,
+      observacoes: ehGratuito
+        ? `Plano gratuito com ${DIAS_TRIAL_PADRAO} dias de teste completo.`
+        : `Plano ${planoEscolhido.nome} selecionado no cadastro.`,
+      atualizado_em: new Date().toISOString(),
+    };
+
     if (assinaturaExistente) {
-      await db
+      const { error } = await db
         .from("assinaturas")
-        .update({
-          status: ehGratuito ? "trial" : "ativa",
-          trial_ate: trialAte,
-          observacoes: ehGratuito
-            ? `Plano gratuito com ${DIAS_TRIAL_PADRAO} dias de teste completo.`
-            : `Plano ${planoEscolhido.nome} selecionado no cadastro.`,
-          atualizado_em: new Date().toISOString(),
-        })
+        .update(dadosAssinatura)
         .eq("id", assinaturaExistente.id);
+      if (error) throw new Error("Não foi possível atualizar a assinatura da agência.");
     } else {
-      await db.from("assinaturas").insert({
+      const { error } = await db.from("assinaturas").insert({
         empresa_id: empresaId,
-        status: ehGratuito ? "trial" : "ativa",
-        trial_ate: trialAte,
+        ...dadosAssinatura,
         inicio_ciclo: new Date().toISOString(),
-        observacoes: ehGratuito
-          ? `Plano gratuito com ${DIAS_TRIAL_PADRAO} dias de teste completo.`
-          : `Plano ${planoEscolhido.nome} selecionado no cadastro.`,
       });
+      if (error) throw new Error("Não foi possível criar a assinatura da agência.");
     }
 
     // 5. Tenta abrir ciclo de cobrança inicial

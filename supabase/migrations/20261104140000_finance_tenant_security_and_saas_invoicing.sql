@@ -14,22 +14,22 @@ RETURNS uuid
 LANGUAGE sql
 STABLE
 SECURITY DEFINER
-SET search_path = public
+SET search_path = pg_catalog, public, pg_temp
 AS $$
   SELECT public.empresa_do_fechamento(p.fechamento_id)
   FROM public.pagamentos p
   WHERE p.id = _pagamento_id;
 $$;
 
-REVOKE ALL ON FUNCTION public.empresa_do_pagamento(uuid) FROM public, anon;
-GRANT EXECUTE ON FUNCTION public.empresa_do_pagamento(uuid) TO authenticated, service_role;
+REVOKE ALL ON FUNCTION public.empresa_do_pagamento(uuid) FROM public, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.empresa_do_pagamento(uuid) TO service_role;
 
 -- 2. RPC: Bloqueio e transição atômica de pagamento com validação estrita de tenant
 CREATE OR REPLACE FUNCTION public.iniciar_processamento_pagamento_pix(_pagamento_id uuid)
 RETURNS jsonb
 LANGUAGE plpgsql
 SECURITY DEFINER
-SET search_path = public
+SET search_path = pg_catalog, public, pg_temp
 AS $$
 DECLARE
   v_pagamento RECORD;
@@ -114,7 +114,7 @@ CREATE OR REPLACE FUNCTION public.efetivar_pagamento_pix_db(
 RETURNS jsonb
 LANGUAGE plpgsql
 SECURITY DEFINER
-SET search_path = public
+SET search_path = pg_catalog, public, pg_temp
 AS $$
 DECLARE
   v_pagamento RECORD;
@@ -214,7 +214,7 @@ CREATE OR REPLACE FUNCTION public.reverter_transferencia_pagamento_pix(
 RETURNS jsonb
 LANGUAGE plpgsql
 SECURITY DEFINER
-SET search_path = public
+SET search_path = pg_catalog, public, pg_temp
 AS $$
 DECLARE
   v_pagamento RECORD;
@@ -314,7 +314,7 @@ CREATE OR REPLACE FUNCTION public.liquidar_fatura_plataforma_asaas(
 RETURNS jsonb
 LANGUAGE plpgsql
 SECURITY DEFINER
-SET search_path = public
+SET search_path = pg_catalog, public, pg_temp
 AS $$
 DECLARE
   v_fatura RECORD;
@@ -388,17 +388,17 @@ $$;
 
 -- 6. Enforçamento de permissões: Revoga anon/public e concede a authenticated / service_role
 REVOKE ALL ON FUNCTION public.iniciar_processamento_pagamento_pix(uuid) FROM public, anon;
-REVOKE ALL ON FUNCTION public.efetivar_pagamento_pix_db(uuid, uuid, text, text, timestamptz, text, text, text) FROM public, anon;
-REVOKE ALL ON FUNCTION public.reverter_transferencia_pagamento_pix(uuid, text, text, text) FROM public, anon;
-REVOKE ALL ON FUNCTION public.liquidar_fatura_plataforma_asaas(uuid, text, numeric) FROM public, anon;
+REVOKE ALL ON FUNCTION public.efetivar_pagamento_pix_db(uuid, uuid, text, text, timestamptz, text, text, text) FROM public, anon, authenticated;
+REVOKE ALL ON FUNCTION public.reverter_transferencia_pagamento_pix(uuid, text, text, text) FROM public, anon, authenticated;
+REVOKE ALL ON FUNCTION public.liquidar_fatura_plataforma_asaas(uuid, text, numeric) FROM public, anon, authenticated;
 
 GRANT EXECUTE ON FUNCTION public.iniciar_processamento_pagamento_pix(uuid) TO authenticated, service_role;
-GRANT EXECUTE ON FUNCTION public.efetivar_pagamento_pix_db(uuid, uuid, text, text, timestamptz, text, text, text) TO authenticated, service_role;
-GRANT EXECUTE ON FUNCTION public.reverter_transferencia_pagamento_pix(uuid, text, text, text) TO authenticated, service_role;
-GRANT EXECUTE ON FUNCTION public.liquidar_fatura_plataforma_asaas(uuid, text, numeric) TO authenticated, service_role;
+GRANT EXECUTE ON FUNCTION public.efetivar_pagamento_pix_db(uuid, uuid, text, text, timestamptz, text, text, text) TO service_role;
+GRANT EXECUTE ON FUNCTION public.reverter_transferencia_pagamento_pix(uuid, text, text, text) TO service_role;
+GRANT EXECUTE ON FUNCTION public.liquidar_fatura_plataforma_asaas(uuid, text, numeric) TO service_role;
 
 -- 7. Expansão de status da assinatura para suportar 'pendente' e 'aguardando_pagamento'
 ALTER TABLE public.assinaturas DROP CONSTRAINT IF EXISTS assinaturas_status_check;
 ALTER TABLE public.assinaturas ADD CONSTRAINT assinaturas_status_check
-  CHECK (status IN ('trial', 'ativa', 'bloqueada', 'cancelada', 'pendente', 'aguardando_pagamento'));
+  CHECK (status IN ('trial', 'em_trial', 'ativa', 'bloqueada', 'cancelada', 'pendente', 'aguardando_pagamento'));
 

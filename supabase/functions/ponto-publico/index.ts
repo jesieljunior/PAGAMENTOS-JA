@@ -45,62 +45,129 @@ function tokenValue(value: unknown): string {
   return token;
 }
 
+function validarEventoOperacional(status: string): void {
+  if (
+    new Set<string>(["fechamento", "pagamento", "concluido", "arquivado", "cancelado"]).has(status)
+  ) {
+    throw new RequestError("Este evento não está disponível para registro de ponto.");
+  }
+}
+
+async function validarAcessoPonto(supabase: AdminClient, empresaId: string): Promise<void> {
+  const [{ data: empresa, error: erroEmpresa }, { data: assinatura, error: erroAssinatura }] =
+    await Promise.all([
+      supabase.from("empresas").select("ativa").eq("id", empresaId).maybeSingle(),
+      supabase
+        .from("assinaturas")
+        .select("status, trial_ate")
+        .eq("empresa_id", empresaId)
+        .maybeSingle(),
+    ]);
+
+  failIfError(erroEmpresa, "Não foi possível validar a agência");
+  failIfError(erroAssinatura, "Não foi possível validar a assinatura");
+
+  const trialValido =
+    (assinatura?.status === "trial" || assinatura?.status === "em_trial") &&
+    Boolean(assinatura?.trial_ate && new Date(assinatura.trial_ate).getTime() > Date.now());
+  if (!empresa?.ativa || !(assinatura?.status === "ativa" || trialValido)) {
+    throw new RequestError(
+      "A agência ou a assinatura não está habilitada para registro de ponto.",
+      403,
+    );
+  }
+}
+
 function validarValidadeQr(evento: {
   data_fim: string | null;
   qr_code_expira_em: string | null;
+  qr_code_gerado_em: string | null;
+  criado_em: string | null;
 }): string {
   const agora = Date.now();
-  if (evento.qr_code_expira_em) {
-    const expira = new Date(evento.qr_code_expira_em).getTime();
-    if (!Number.isFinite(expira) || agora > expira) {
-      throw new RequestError(
-        "Este QR Code está expirado. Peça ao supervisor para gerar um novo código.",
-      );
-    }
-    return evento.qr_code_expira_em;
-  }
+  const dataBase = evento.qr_code_expira_em
+    ? new Date(evento.qr_code_expira_em).getTime()
+    : evento.data_fim
+      ? new Date(evento.data_fim).getTime() + 12 * 60 * 60_000
+      : new Date(evento.qr_code_gerado_em ?? evento.criado_em ?? "").getTime() + 12 * 60 * 60_000;
 
-  if (evento.data_fim) {
-    const expira = new Date(evento.data_fim).getTime() + 12 * 60 * 60_000;
-    if (!Number.isFinite(expira) || agora > expira) {
-      throw new RequestError(
-        "Este QR Code está expirado. Peça ao supervisor para gerar um novo código.",
-      );
-    }
-    return new Date(expira).toISOString();
+  if (!Number.isFinite(dataBase) || agora > dataBase) {
+    throw new RequestError(
+      "Este QR Code está expirado. Peça ao supervisor para gerar um novo código.",
+    );
   }
-
-  return new Date(agora + 12 * 60 * 60_000).toISOString();
+  return new Date(dataBase).toISOString();
 }
+
+let chaveHashPromise: Promise<CryptoKey> | null = null;
 
 async function hash(value: string): Promise<string> {
-  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value));
-  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
+  const segredo = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+  if (!segredo) {
+    throw new RequestError("Configuração de proteção de dados do ponto incompleta.", 500);
+  }
+
+  chaveHashPromise ??= crypto.subtle.importKey(
+    "raw",
+    new TextEncoder().encode(segredo),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"],
+  );
+  const assinatura = await crypto.subtle.sign(
+    "HMAC",
+    await chaveHashPromise,
+    new TextEncoder().encode(value),
+  );
+  return Array.from(new Uint8Array(assinatura), (byte) => byte.toString(16).padStart(2, "0")).join(
+    "",
+  );
 }
 
-async function registrarTentativa(
-  supabase: AdminClient,
-  token: string,
-  cpf: string,
-  ip: string,
-  action: string,
-  sucesso: boolean,
-): Promise<void> {
-  const { error } = await supabase.from("tentativas_ponto_publico").insert({
-    token_hash: await hash(token),
-    cpf_hash: await hash(cpf),
-    ip_hash: await hash(ip),
-    acao: action,
-    sucesso,
-  });
-  failIfError(error, "Não foi possível registrar auditoria da tentativa");
+async function lerJsonLimitado(request: Request, limiteBytes = 8 * 1024 * 1024): Promise<unknown> {
+  const tamanhoDeclarado = Number(request.headers.get("content-length"));
+  if (Number.isFinite(tamanhoDeclarado) && tamanhoDeclarado > limiteBytes) {
+    throw new RequestError("A requisição excede o limite de tamanho permitido.", 413);
+  }
+
+  const reader = request.body?.getReader();
+  if (!reader) throw new RequestError("Corpo da requisição ausente.");
+
+  const partes: Uint8Array[] = [];
+  let totalBytes = 0;
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    if (!value) continue;
+
+    totalBytes += value.byteLength;
+    if (totalBytes > limiteBytes) {
+      await reader.cancel();
+      throw new RequestError("A requisição excede o limite de tamanho permitido.", 413);
+    }
+    partes.push(value);
+  }
+
+  const bytes = new Uint8Array(totalBytes);
+  let deslocamento = 0;
+  for (const parte of partes) {
+    bytes.set(parte, deslocamento);
+    deslocamento += parte.byteLength;
+  }
+
+  try {
+    return JSON.parse(new TextDecoder().decode(bytes)) as unknown;
+  } catch {
+    throw new RequestError("JSON da requisição inválido.");
+  }
 }
 
 async function comLimiteDeTentativas<T>(
   supabase: AdminClient,
   request: Request,
   token: string,
-  cpf: string,
+  cpf: string | null,
   action: string,
   operation: () => Promise<T>,
 ): Promise<T> {
@@ -108,29 +175,45 @@ async function comLimiteDeTentativas<T>(
     request.headers.get("cf-connecting-ip") ??
     request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ??
     "indisponivel";
-  const desde = new Date(Date.now() - 10 * 60_000).toISOString();
   const tokenHash = await hash(token);
   const ipHash = await hash(ip);
-  const { count, error } = await supabase
-    .from("tentativas_ponto_publico")
-    .select("id", { count: "exact", head: true })
-    .eq("token_hash", tokenHash)
-    .eq("ip_hash", ipHash)
-    .gte("criado_em", desde);
+  const cpfHash = cpf ? await hash(cpf) : null;
+
+  const iniciarTentativa = supabase.rpc as unknown as (
+    nome: string,
+    argumentos: Record<string, unknown>,
+  ) => PromiseLike<{
+    data: { permitido: boolean; tentativa_id: string | null }[] | null;
+    error: { message: string } | null;
+  }>;
+  const { data, error } = await iniciarTentativa("iniciar_tentativa_ponto_publico", {
+    _token_hash: tokenHash,
+    _cpf_hash: cpfHash,
+    _ip_hash: ipHash,
+    _acao: action,
+  });
   failIfError(error, "Não foi possível verificar o limite de tentativas");
-  if ((count ?? 0) >= 20) {
+
+  const tentativa = data?.[0];
+  if (!tentativa?.permitido || !tentativa.tentativa_id) {
     throw new RequestError("Muitas tentativas. Aguarde 10 minutos e tente novamente.", 429);
   }
 
   try {
     const result = await operation();
-    await registrarTentativa(supabase, token, cpf, ip, action, true);
+    const { error: erroAtualizacao } = await supabase
+      .from("tentativas_ponto_publico")
+      .update({ sucesso: true })
+      .eq("id", tentativa.tentativa_id);
+    failIfError(erroAtualizacao, "Não foi possível finalizar auditoria da tentativa");
     return result;
   } catch (error) {
-    try {
-      await registrarTentativa(supabase, token, cpf, ip, action, false);
-    } catch (auditError) {
-      console.error("[ponto-publico] Falha ao registrar tentativa malsucedida:", auditError);
+    const { error: erroAtualizacao } = await supabase
+      .from("tentativas_ponto_publico")
+      .update({ sucesso: false })
+      .eq("id", tentativa.tentativa_id);
+    if (erroAtualizacao) {
+      console.error("[ponto-publico] Falha ao registrar tentativa malsucedida:", erroAtualizacao);
     }
     throw error;
   }
@@ -139,21 +222,27 @@ async function comLimiteDeTentativas<T>(
 async function localizarEscala(supabase: AdminClient, token: string, cpf: string) {
   const { data: evento, error: erroEvento } = await supabase
     .from("eventos")
-    .select("id, empresa_id, data_fim, qr_code_expira_em")
+    .select(
+      "id, empresa_id, status, data_inicio, data_fim, qr_code_expira_em, qr_code_gerado_em, criado_em",
+    )
     .eq("qr_code_token", token)
     .maybeSingle();
   failIfError(erroEvento, "Não foi possível localizar o evento do QR Code");
   if (!evento) throw new RequestError("QR Code inválido.");
+  validarEventoOperacional(evento.status);
+  await validarAcessoPonto(supabase, evento.empresa_id);
   validarValidadeQr(evento);
 
   const { data: freelancer, error: erroFreelancer } = await supabase
     .from("freelancers")
-    .select("id, nome")
+    .select("id, nome, ativo")
     .eq("empresa_id", evento.empresa_id)
     .eq("cpf", cpf)
     .maybeSingle();
   failIfError(erroFreelancer, "Não foi possível localizar o colaborador");
-  if (!freelancer) throw new RequestError("CPF não encontrado nesta agência.");
+  if (!freelancer || !freelancer.ativo) {
+    throw new RequestError("CPF não encontrado ou colaborador inativo nesta agência.");
+  }
 
   const { data: equipes, error: erroEquipes } = await supabase
     .from("equipes")
@@ -182,11 +271,15 @@ async function localizarEscala(supabase: AdminClient, token: string, cpf: string
 async function obterContexto(supabase: AdminClient, token: string) {
   const { data: evento, error: erroEvento } = await supabase
     .from("eventos")
-    .select("id, nome, local, status, empresa_id, data_inicio, data_fim, qr_code_expira_em")
+    .select(
+      "id, nome, local, status, empresa_id, data_inicio, data_fim, qr_code_expira_em, qr_code_gerado_em, criado_em",
+    )
     .eq("qr_code_token", token)
     .maybeSingle();
   failIfError(erroEvento, "Não foi possível consultar o QR Code");
   if (!evento) throw new RequestError("QR Code inválido ou expirado.");
+  validarEventoOperacional(evento.status);
+  await validarAcessoPonto(supabase, evento.empresa_id);
 
   const expiraEm = validarValidadeQr(evento);
   const { data: config, error: erroConfig } = await supabase
@@ -263,7 +356,7 @@ async function registrar(supabase: AdminClient, input: Record<string, unknown>) 
   const tipoValido = tipo as TipoPonto;
   const fotoBase64 =
     typeof input.fotoBase64 === "string" && input.fotoBase64.length > 0
-      ? text(input.fotoBase64, "Selfie", 1, 4_000_000)
+      ? text(input.fotoBase64, "Selfie", 1, 7_000_000)
       : null;
   const lat = input.lat === null || input.lat === undefined ? null : Number(input.lat);
   const lng = input.lng === null || input.lng === undefined ? null : Number(input.lng);
@@ -284,8 +377,8 @@ async function registrar(supabase: AdminClient, input: Record<string, unknown>) 
   if (config?.checkin_exige_selfie && !fotoBase64) {
     throw new RequestError("Esta agência exige selfie no registro de ponto.");
   }
-  if (config?.checkin_exige_selfie && input.consentiuSelfie !== true) {
-    throw new RequestError("Confirme o uso da selfie para revisão do registro.");
+  if (fotoBase64 && input.consentiuSelfie !== true) {
+    throw new RequestError("A selfie só pode ser enviada após consentimento explícito.");
   }
   if (config?.checkin_exige_gps && (lat === null || lng === null)) {
     throw new RequestError("Esta agência exige a localização no registro de ponto.");
@@ -295,20 +388,38 @@ async function registrar(supabase: AdminClient, input: Record<string, unknown>) 
   if (fotoBase64) {
     const partesFoto = /^data:image\/(jpeg|png|webp);base64,([A-Za-z0-9+/=]+)$/.exec(fotoBase64);
     if (!partesFoto) throw new RequestError("Formato de selfie inválido.");
-    const formato = partesFoto[1];
-    const bytes = Uint8Array.from(atob(partesFoto[2]!), (caractere) => caractere.charCodeAt(0));
+    const formato = partesFoto[1]!;
+    const base64 = partesFoto[2]!;
+    const padding = base64.endsWith("==") ? 2 : base64.endsWith("=") ? 1 : 0;
+    const tamanhoEstimado = Math.floor((base64.length * 3) / 4) - padding;
+    if (tamanhoEstimado > 5 * 1024 * 1024) {
+      throw new RequestError("A selfie deve ter no máximo 5 MB.", 413);
+    }
+
+    let bytes: Uint8Array;
+    try {
+      bytes = Uint8Array.from(atob(base64), (caractere) => caractere.charCodeAt(0));
+    } catch {
+      throw new RequestError("Conteúdo da selfie inválido.");
+    }
     const caminho = `${evento.empresa_id}/${escala.id}/${crypto.randomUUID()}.${formato === "jpeg" ? "jpg" : formato}`;
     try {
       const { error } = await supabase.storage
         .from("selfies-ponto")
         .upload(caminho, bytes, { contentType: `image/${formato}`, upsert: false });
-      if (!error) {
-        fotoUrl = caminho;
-      } else {
-        fotoUrl = fotoBase64;
+      if (error) {
+        throw new RequestError(
+          "Não foi possível armazenar a selfie. Nenhuma marcação foi registrada.",
+          500,
+        );
       }
-    } catch {
-      fotoUrl = fotoBase64;
+      fotoUrl = caminho;
+    } catch (error) {
+      if (error instanceof RequestError) throw error;
+      throw new RequestError(
+        "Não foi possível armazenar a selfie. Nenhuma marcação foi registrada.",
+        500,
+      );
     }
   }
 
@@ -331,49 +442,43 @@ async function registrar(supabase: AdminClient, input: Record<string, unknown>) 
     throw new RequestError(`O próximo registro deve ser ${esperado.replaceAll("_", " ")}.`);
   }
 
-  const agora = new Date();
-  const foraHorario = Boolean(evento.data_fim && agora > new Date(evento.data_fim));
-  const retencaoDias = Math.min(
-    config?.selfie_retencao_dias ?? 90,
-    plano?.retencao_evidencias_dias ?? 365,
-  );
-  const { data: ponto, error: erroPonto } = await supabase
-    .from("pontos")
-    .insert({
-      escala_id: escala.id,
-      tipo: tipoValido,
-      metodo: fotoBase64 ? "selfie" : "qrcode",
-      registrado_em: agora.toISOString(),
-      foto_url: fotoUrl,
-      gps_lat: lat,
-      gps_lng: lng,
-      status: "pendente",
-      fora_horario: foraHorario,
-      selfie_consentimento_aceito_em: fotoBase64 ? agora.toISOString() : null,
-      selfie_expira_em: fotoBase64
-        ? new Date(agora.getTime() + retencaoDias * 24 * 60 * 60_000).toISOString()
-        : null,
-    })
-    .select("id")
-    .single();
-  failIfError(erroPonto, "Não foi possível registrar a marcação");
-  if (!ponto) throw new RequestError("Não foi possível confirmar a gravação da marcação.", 500);
-
-  const { error: erroAuditoria } = await supabase.from("auditoria_ponto_publico").insert({
-    empresa_id: evento.empresa_id,
-    escala_id: escala.id,
-    ponto_id: ponto.id,
-    acao: "ponto_registrado",
-    resultado: "sucesso",
-    detalhes: {
-      tipo: tipoValido,
-      fora_horario: foraHorario,
-      com_selfie: Boolean(fotoBase64),
-    },
+  const chamarRpc = supabase.rpc as unknown as (
+    nome: string,
+    argumentos: Record<string, unknown>,
+  ) => PromiseLike<{ data: unknown; error: { message: string } | null }>;
+  const { data: resultadoRpc, error: erroRpc } = await chamarRpc("registrar_ponto_publico", {
+    _token: token,
+    _cpf: cpf,
+    _escala_id: escala.id,
+    _tipo: tipoValido,
+    _foto_url: fotoUrl,
+    _gps_lat: lat,
+    _gps_lng: lng,
+    _consentiu_selfie: input.consentiuSelfie === true,
   });
-  failIfError(erroAuditoria, "A marcação foi registrada, mas a auditoria falhou");
 
-  return { ok: true as const, foraHorario };
+  if (erroRpc) {
+    if (fotoUrl) {
+      const { error: erroRemocao } = await supabase.storage.from("selfies-ponto").remove([fotoUrl]);
+      if (erroRemocao) {
+        console.error("[ponto-publico] Não foi possível remover selfie órfã:", erroRemocao);
+      }
+    }
+    throw new RequestError(erroRpc.message || "Não foi possível registrar a marcação.", 400);
+  }
+
+  const resultado = resultadoRpc as { ok?: boolean; foraHorario?: boolean } | null;
+  if (!resultado?.ok) {
+    if (fotoUrl) {
+      const { error: erroRemocao } = await supabase.storage.from("selfies-ponto").remove([fotoUrl]);
+      if (erroRemocao) {
+        console.error("[ponto-publico] Não foi possível remover selfie órfã:", erroRemocao);
+      }
+    }
+    throw new RequestError("O banco não confirmou o registro da marcação.", 500);
+  }
+
+  return { ok: true as const, foraHorario: Boolean(resultado.foraHorario) };
 }
 
 Deno.serve(async (request: Request) => {
@@ -395,7 +500,7 @@ Deno.serve(async (request: Request) => {
       auth: { persistSession: false, autoRefreshToken: false },
     });
 
-    const input: unknown = await request.json();
+    const input = await lerJsonLimitado(request);
     if (!input || typeof input !== "object" || Array.isArray(input)) {
       throw new RequestError("Requisição inválida.");
     }
@@ -405,7 +510,9 @@ Deno.serve(async (request: Request) => {
 
     let result: unknown;
     if (action === "contexto") {
-      result = await obterContexto(supabase, token);
+      result = await comLimiteDeTentativas(supabase, request, token, null, action, () =>
+        obterContexto(supabase, token),
+      );
     } else if (action === "identificar" || action === "confirmar" || action === "registrar") {
       const cpf = cpfValue(body.cpf);
       if (action === "identificar") {

@@ -9,6 +9,7 @@ import { z } from "zod";
 
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { requireOrganizationContext } from "@/lib/autorizacao.server";
+import { isRecebimentoManualEmDinheiro } from "@/lib/asaas-payment-policy";
 
 const cobrancaSchema = z.object({
   clienteId: z.string().uuid(),
@@ -132,7 +133,7 @@ export const criarCobranca = createServerFn({ method: "POST" })
     }
   });
 
-/** Consulta o Asaas e credita o saldo quando a cobrança já foi paga. */
+/** Consulta o Asaas e liquida a cobrança e o saldo em uma única transação. */
 export const sincronizarCobranca = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .validator((input: unknown) => z.object({ id: z.string().uuid() }).parse(input))
@@ -142,65 +143,64 @@ export const sincronizarCobranca = createServerFn({ method: "POST" })
     const { exigirCapacidade } = await import("./autorizacao.server");
     await exigirCapacidade(supabase, userId, "financeiro.gerenciar");
     const contextoEmpresa = requireOrganizationContext(context);
-    const { data: cobranca } = await supabase
+    const { data: cobranca, error: erroCobranca } = await supabase
       .from("cobrancas")
-      .select("id, empresa_id, valor, status, parceiro_cobranca_id, descricao")
+      .select("id, empresa_id, valor, status, parceiro_cobranca_id")
       .eq("id", data.id)
       .maybeSingle();
-    if (!cobranca) throw new Error("Cobrança não encontrada.");
+    if (erroCobranca || !cobranca) throw new Error("Cobrança não encontrada.");
     if (cobranca.empresa_id !== contextoEmpresa.empresaId) {
       throw new Error("Cobrança não pertence à sua agência.");
     }
-    if (cobranca.status === "pago") return { status: "pago" as const };
     if (!cobranca.parceiro_cobranca_id) throw new Error("Cobrança sem registro no parceiro.");
 
     const { obterCobrancaAsaas } = await import("./asaas.server");
     const remota = await obterCobrancaAsaas(cobranca.parceiro_cobranca_id);
-    const pago = ["RECEIVED", "CONFIRMED", "RECEIVED_IN_CASH"].includes(remota.status);
-    if (!pago) return { status: remota.status };
-
-    const { data: taxaPendente } = await supabase
-      .from("taxas_plataforma")
-      .select("id, valor")
-      .eq("cobranca_id", cobranca.id)
-      .eq("status", "pendente")
-      .maybeSingle();
-
-    const valorCredito = taxaPendente
-      ? Math.max(0, Number(cobranca.valor) - Number(taxaPendente.valor))
-      : Number(cobranca.valor);
-
-    await supabase
-      .from("cobrancas")
-      .update({ status: "pago", pago_em: new Date().toISOString() })
-      .eq("id", cobranca.id);
-
-    await supabase.from("movimentos_saldo").insert({
-      empresa_id: cobranca.empresa_id,
-      tipo: "credito",
-      valor: valorCredito,
-      descricao: `Cobrança paga — ${cobranca.descricao}`,
-      cobranca_id: cobranca.id,
-    });
-
-    await supabase
-      .from("fundings")
-      .update({
-        status: "available",
-        valor_disponivel: valorCredito,
-        referencia_parceiro: cobranca.parceiro_cobranca_id,
-      })
-      .eq("cobranca_id", cobranca.id)
-      .eq("status", "pending");
-
-    if (taxaPendente) {
-      await supabase
-        .from("taxas_plataforma")
-        .update({ status: "cobrada" })
-        .eq("id", taxaPendente.id);
+    if (!remota.billingType) {
+      throw new Error("Asaas não retornou billingType para a cobrança operacional.");
+    }
+    if (isRecebimentoManualEmDinheiro(remota.billingType)) {
+      throw new Error(
+        "Recebimento manual em dinheiro não disponibiliza saldo no Asaas e exige conciliação manual.",
+      );
+    }
+    if (
+      remota.id !== cobranca.parceiro_cobranca_id ||
+      remota.externalReference !== cobranca.id ||
+      !Number.isFinite(Number(remota.value)) ||
+      Math.abs(Number(remota.value) - Number(cobranca.valor)) >= 0.005
+    ) {
+      throw new Error("Cobrança do Asaas não corresponde ao registro ou ao valor esperado.");
     }
 
-    return { status: "pago" as const };
+    // Só PAYMENT_RECEIVED com saldo disponível pode liberar funding operacional.
+    if (remota.status !== "RECEIVED") {
+      return { status: remota.status };
+    }
+
+    const { supabaseAdmin, hasAdminKey } = await import("@/integrations/supabase/client.server");
+    if (!hasAdminKey()) throw new Error("Configuração administrativa do Supabase ausente.");
+    const rpcFinanceiro = supabaseAdmin.rpc.bind(supabaseAdmin) as unknown as (
+      nome: string,
+      args: Record<string, unknown>,
+    ) => Promise<{
+      data: { ok?: boolean; ja_processada?: boolean; cobranca_duplicada?: boolean } | null;
+      error: { message: string } | null;
+    }>;
+    const { data: resultado, error } = await rpcFinanceiro("liquidar_cobranca_funding_asaas", {
+      _cobranca_id: cobranca.id,
+      _parceiro_id: remota.id,
+      _valor: Number(remota.value),
+    });
+    if (error || !resultado?.ok) {
+      throw new Error("Não foi possível liquidar a cobrança e o crédito de saldo atomicamente.");
+    }
+
+    return {
+      status: "pago" as const,
+      jaProcessada: Boolean(resultado.ja_processada),
+      cobrancaDuplicada: Boolean(resultado.cobranca_duplicada),
+    };
   });
 
 /** Envia o Pix ao freelancer contra o saldo da agência. */

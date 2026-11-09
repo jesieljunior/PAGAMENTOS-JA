@@ -328,6 +328,13 @@ export const rotacionarQrEvento = createServerFn({ method: "POST" })
     if (!evento || evento.empresa_id !== contexto.empresaId) {
       throw new Error("Evento não encontrado.");
     }
+    if (
+      new Set<string>(["fechamento", "pagamento", "concluido", "arquivado", "cancelado"]).has(
+        evento.status,
+      )
+    ) {
+      throw new Error("Não é possível gerar QR Code para um evento encerrado ou cancelado.");
+    }
 
     const agora = Date.now();
     const geradoEm = new Date(agora);
@@ -392,17 +399,25 @@ export const rotacionarQrEvento = createServerFn({ method: "POST" })
       },
     });
 
-    const signedToken = criarTokenQrCodeAssinado({
-      id: evento.id,
-      empresa_id: evento.empresa_id,
-      nome: evento.nome,
-      local: evento.local,
-      status: evento.status,
-      data_inicio: evento.data_inicio,
-      data_fim: evento.data_fim,
-      qr_code_expira_em: expiraEm,
-      qr_code_token: token,
-    });
+    const signedToken = criarTokenQrCodeAssinado(
+      {
+        id: evento.id,
+        empresa_id: evento.empresa_id,
+        nome: evento.nome,
+        local: evento.local,
+        status: evento.status,
+        data_inicio: evento.data_inicio,
+        data_fim: evento.data_fim,
+        qr_code_expira_em: expiraEm,
+        qr_code_token: token,
+      },
+      {
+        exigeSelfie: false,
+        exigeGps: false,
+        pontoBasico: false,
+        expiraEm,
+      },
+    );
 
     salvarSessaoEvento({
       eventoId: evento.id,

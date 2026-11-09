@@ -205,7 +205,14 @@ export async function obterPixCopiaCola(cobrancaId: string): Promise<string | nu
 }
 
 export async function obterCobrancaAsaas(cobrancaId: string) {
-  return chamar<{ id: string; status: string; paymentDate?: string }>(`/payments/${cobrancaId}`);
+  return chamar<{
+    id: string;
+    status: string;
+    billingType: string;
+    value?: number;
+    externalReference?: string;
+    paymentDate?: string;
+  }>(`/payments/${cobrancaId}`);
 }
 
 export async function buscarCobrancaPorReferencia(referenciaExterna: string) {
@@ -213,11 +220,13 @@ export async function buscarCobrancaPorReferencia(referenciaExterna: string) {
     data: Array<{
       id: string;
       status: string;
+      billingType: string;
       paymentDate?: string;
       value?: number;
+      externalReference?: string;
       invoiceUrl?: string;
     }>;
-  }>(`/payments?externalReference=${encodeURIComponent(referenciaExterna)}&limit=1`);
+  }>(`/payments?externalReference=${encodeURIComponent(referenciaExterna)}&limit=10`);
 }
 
 /** Tipo da chave Pix inferido pelo formato, como o Asaas espera. */
@@ -262,17 +271,31 @@ export function normalizarChavePix(chave: string): {
   return { chave: chaveFormatada, tipo };
 }
 
-export type TransferenciaAsaas = { id: string; status: string; failReason?: string };
+export type TransferenciaAsaas = {
+  id: string;
+  status: string;
+  value?: number;
+  externalReference?: string;
+  failReason?: string;
+};
+
+export async function obterTransferenciaAsaas(
+  transferenciaId: string,
+): Promise<TransferenciaAsaas> {
+  return chamar<TransferenciaAsaas>(`/transfers/${encodeURIComponent(transferenciaId)}`);
+}
 
 export async function transferirPix(dados: {
   valor: number;
   chavePix: string;
   descricao: string;
   referenciaExterna: string;
-  chaveIdempotencia: string;
 }): Promise<TransferenciaAsaas> {
   const { chave: pixAddressKey, tipo: pixAddressKeyType } = normalizarChavePix(dados.chavePix);
-  const transferencia = await chamar<TransferenciaAsaas>("/transfers", {
+  // A API de transferências documenta externalReference, mas não documenta
+  // idempotencyKey como campo do body. A prevenção de duplicidade é local:
+  // lock transacional + não repetir resultados inconclusivos.
+  return chamar<TransferenciaAsaas>("/transfers", {
     method: "POST",
     body: {
       value: dados.valor,
@@ -281,16 +304,6 @@ export async function transferirPix(dados: {
       pixAddressKeyType,
       description: dados.descricao,
       externalReference: dados.referenciaExterna,
-      idempotencyKey: dados.chaveIdempotencia,
     },
   });
-
-  if (transferencia.status === "FAILED" || transferencia.failReason) {
-    throw new AsaasError(
-      `Pix recusado pelo parceiro: ${transferencia.failReason || "Falha na transferência"}`,
-      400,
-    );
-  }
-
-  return transferencia;
 }

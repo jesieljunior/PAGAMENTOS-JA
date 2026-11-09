@@ -1,5 +1,11 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "buildCommand": "NITRO_PRESET=vercel npm run build",
-  "outputDirectory": ".vercel/output"
+  "outputDirectory": ".vercel/output",
+  "crons": [
+    {
+      "path": "/api/internal/purgar-selfies-ponto",
+      "schedule": "0 3 * * *"
+    }
+  ]
 }

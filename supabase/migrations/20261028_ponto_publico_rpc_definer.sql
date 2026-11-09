@@ -55,7 +55,7 @@ CREATE OR REPLACE FUNCTION public.obter_contexto_ponto_por_token(_token text)
 RETURNS jsonb
 LANGUAGE plpgsql
 SECURITY DEFINER
-SET search_path = pg_catalog, public
+SET search_path = pg_catalog, public, pg_temp
 AS $$
 DECLARE
   v_evento record;
@@ -70,6 +70,22 @@ BEGIN
   WHERE qr_code_token = _token;
 
   IF NOT FOUND THEN
+    RETURN NULL;
+  END IF;
+
+  IF v_evento.status IN ('fechamento', 'pagamento', 'concluido', 'arquivado', 'cancelado')
+     OR NOT EXISTS (
+       SELECT 1 FROM public.empresas e
+       WHERE e.id = v_evento.empresa_id AND e.ativa
+     )
+     OR NOT EXISTS (
+       SELECT 1 FROM public.assinaturas a
+       WHERE a.empresa_id = v_evento.empresa_id
+         AND (
+           a.status = 'ativa'
+           OR (a.status IN ('trial', 'em_trial') AND a.trial_ate > v_agora)
+         )
+     ) THEN
     RETURN NULL;
   END IF;
 
@@ -125,7 +141,7 @@ CREATE OR REPLACE FUNCTION public.identificar_no_ponto_publico(_token text, _cpf
 RETURNS jsonb
 LANGUAGE plpgsql
 SECURITY DEFINER
-SET search_path = pg_catalog, public
+SET search_path = pg_catalog, public, pg_temp
 AS $$
 DECLARE
   v_evento record;
@@ -139,7 +155,7 @@ BEGIN
     RAISE EXCEPTION 'CPF deve conter exatamente 11 dígitos.';
   END IF;
 
-  SELECT id, empresa_id, data_inicio, data_fim, qr_code_expira_em, qr_code_gerado_em, criado_em
+  SELECT id, empresa_id, status, data_inicio, data_fim, qr_code_expira_em, qr_code_gerado_em, criado_em
   INTO v_evento
   FROM public.eventos
   WHERE qr_code_token = _token;
@@ -148,17 +164,36 @@ BEGIN
     RAISE EXCEPTION 'QR Code inválido ou não encontrado.';
   END IF;
 
+  IF v_evento.status IN ('fechamento', 'pagamento', 'concluido', 'arquivado', 'cancelado')
+     OR NOT EXISTS (
+       SELECT 1 FROM public.empresas e
+       WHERE e.id = v_evento.empresa_id AND e.ativa
+     )
+     OR NOT EXISTS (
+       SELECT 1 FROM public.assinaturas a
+       WHERE a.empresa_id = v_evento.empresa_id
+         AND (
+           a.status = 'ativa'
+           OR (a.status IN ('trial', 'em_trial') AND a.trial_ate > v_agora)
+         )
+     ) THEN
+    RAISE EXCEPTION 'Evento ou assinatura indisponível para registro público de ponto.';
+  END IF;
+
   -- Validação de expiração
-  IF v_evento.qr_code_expira_em IS NOT NULL AND v_agora > v_evento.qr_code_expira_em THEN
-    IF v_agora - COALESCE(v_evento.qr_code_gerado_em, v_evento.criado_em) > interval '12 hours' THEN
+  IF v_evento.qr_code_expira_em IS NOT NULL THEN
+    IF v_agora > v_evento.qr_code_expira_em
+       AND v_agora - COALESCE(v_evento.qr_code_gerado_em, v_evento.criado_em) > interval '12 hours' THEN
       RAISE EXCEPTION 'Este QR Code está expirado.';
     END IF;
+  ELSIF v_evento.data_fim IS NOT NULL AND v_agora > v_evento.data_fim + interval '12 hours' THEN
+    RAISE EXCEPTION 'Este QR Code está expirado.';
   END IF;
 
   SELECT id, nome
   INTO v_freelancer
   FROM public.freelancers
-  WHERE empresa_id = v_evento.empresa_id AND regexp_replace(cpf, '\D', '', 'g') = v_cpf_limpo;
+  WHERE empresa_id = v_evento.empresa_id AND ativo AND regexp_replace(cpf, '\D', '', 'g') = v_cpf_limpo;
 
   IF NOT FOUND THEN
     RAISE EXCEPTION 'Colaborador com este CPF não encontrado nesta agência.';
@@ -210,7 +245,7 @@ CREATE OR REPLACE FUNCTION public.confirmar_presenca_ponto_publico(_token text, 
 RETURNS jsonb
 LANGUAGE plpgsql
 SECURITY DEFINER
-SET search_path = pg_catalog, public
+SET search_path = pg_catalog, public, pg_temp
 AS $$
 DECLARE
   v_res jsonb;
@@ -243,7 +278,7 @@ CREATE OR REPLACE FUNCTION public.registrar_ponto_publico(
 RETURNS jsonb
 LANGUAGE plpgsql
 SECURITY DEFINER
-SET search_path = pg_catalog, public
+SET search_path = pg_catalog, public, pg_temp
 AS $$
 DECLARE
   v_evento record;
@@ -264,7 +299,7 @@ BEGIN
     RAISE EXCEPTION 'Tipo de ponto inválido.';
   END IF;
 
-  SELECT id, empresa_id, data_fim, qr_code_expira_em, qr_code_gerado_em, criado_em
+  SELECT id, empresa_id, status, data_inicio, data_fim, qr_code_expira_em, qr_code_gerado_em, criado_em
   INTO v_evento
   FROM public.eventos
   WHERE qr_code_token = _token;
@@ -273,10 +308,38 @@ BEGIN
     RAISE EXCEPTION 'QR Code inválido.';
   END IF;
 
+  IF v_evento.status IN ('fechamento', 'pagamento', 'concluido', 'arquivado', 'cancelado')
+     OR NOT EXISTS (
+       SELECT 1 FROM public.empresas e
+       WHERE e.id = v_evento.empresa_id AND e.ativa
+     )
+     OR NOT EXISTS (
+       SELECT 1 FROM public.assinaturas a
+       WHERE a.empresa_id = v_evento.empresa_id
+         AND (
+           a.status = 'ativa'
+           OR (a.status IN ('trial', 'em_trial') AND a.trial_ate > v_agora)
+         )
+     ) THEN
+    RAISE EXCEPTION 'Evento ou assinatura indisponível para registro público de ponto.';
+  END IF;
+
+  IF v_evento.qr_code_expira_em IS NOT NULL THEN
+    IF v_agora > v_evento.qr_code_expira_em THEN
+      RAISE EXCEPTION 'QR Code expirado.';
+    END IF;
+  ELSIF v_evento.data_fim IS NOT NULL THEN
+    IF v_agora > v_evento.data_fim + interval '12 hours' THEN
+      RAISE EXCEPTION 'QR Code expirado.';
+    END IF;
+  ELSIF v_agora > COALESCE(v_evento.qr_code_gerado_em, v_evento.criado_em) + interval '12 hours' THEN
+    RAISE EXCEPTION 'QR Code expirado.';
+  END IF;
+
   SELECT id, nome
   INTO v_freelancer
   FROM public.freelancers
-  WHERE empresa_id = v_evento.empresa_id AND regexp_replace(cpf, '\D', '', 'g') = v_cpf_limpo;
+  WHERE empresa_id = v_evento.empresa_id AND ativo AND regexp_replace(cpf, '\D', '', 'g') = v_cpf_limpo;
 
   IF NOT FOUND THEN
     RAISE EXCEPTION 'Colaborador não encontrado.';
@@ -293,6 +356,10 @@ BEGIN
 
   IF NOT FOUND THEN
     RAISE EXCEPTION 'Escala inválida para este colaborador.';
+  END IF;
+
+  IF v_escala.status = 'recusado' THEN
+    RAISE EXCEPTION 'Sua participação neste evento foi recusada.';
   END IF;
 
   SELECT checkin_exige_selfie, checkin_exige_gps, selfie_retencao_dias
@@ -338,7 +405,8 @@ BEGIN
     RAISE EXCEPTION 'O próximo registro deve ser %.', replace(v_esperado, '_', ' ');
   END IF;
 
-  IF v_evento.data_fim IS NOT NULL AND v_agora > v_evento.data_fim THEN
+  IF (v_evento.data_inicio IS NOT NULL AND v_agora < v_evento.data_inicio)
+     OR (v_evento.data_fim IS NOT NULL AND v_agora > v_evento.data_fim) THEN
     v_fora_horario := true;
   END IF;
 
@@ -367,7 +435,10 @@ BEGIN
     'pendente'::public.status_ponto,
     v_fora_horario,
     CASE WHEN _foto_url IS NOT NULL THEN v_agora ELSE NULL END,
-    CASE WHEN _foto_url IS NOT NULL THEN v_agora + (v_retencao_dias || ' days')::interval ELSE NULL END
+    CASE WHEN _foto_url IS NOT NULL
+      THEN v_agora + (v_retencao_dias || ' days')::interval
+      ELSE NULL
+    END
   )
   RETURNING id INTO v_ponto_id;
 
@@ -403,24 +474,47 @@ $$;
 
 -- Permissões de execução para qualquer cliente (anon, authenticated, service_role)
 REVOKE ALL ON FUNCTION public.obter_contexto_ponto_por_token(text) FROM PUBLIC;
-GRANT EXECUTE ON FUNCTION public.obter_contexto_ponto_por_token(text) TO anon, authenticated, service_role;
+GRANT EXECUTE ON FUNCTION public.obter_contexto_ponto_por_token(text) TO service_role;
 
 REVOKE ALL ON FUNCTION public.identificar_no_ponto_publico(text, text) FROM PUBLIC;
-GRANT EXECUTE ON FUNCTION public.identificar_no_ponto_publico(text, text) TO anon, authenticated, service_role;
+GRANT EXECUTE ON FUNCTION public.identificar_no_ponto_publico(text, text) TO service_role;
 
 REVOKE ALL ON FUNCTION public.confirmar_presenca_ponto_publico(text, text) FROM PUBLIC;
-GRANT EXECUTE ON FUNCTION public.confirmar_presenca_ponto_publico(text, text) TO anon, authenticated, service_role;
+GRANT EXECUTE ON FUNCTION public.confirmar_presenca_ponto_publico(text, text) TO service_role;
 
 REVOKE ALL ON FUNCTION public.registrar_ponto_publico(text, text, uuid, text, text, double precision, double precision, boolean) FROM PUBLIC;
-GRANT EXECUTE ON FUNCTION public.registrar_ponto_publico(text, text, uuid, text, text, double precision, double precision, boolean) TO anon, authenticated, service_role;
+GRANT EXECUTE ON FUNCTION public.registrar_ponto_publico(text, text, uuid, text, text, double precision, double precision, boolean) TO service_role;
 
 -- 5. Bucket de selfies e permissão de upload público
 INSERT INTO storage.buckets (id, name, public)
 VALUES ('selfies-ponto', 'selfies-ponto', false)
 ON CONFLICT (id) DO NOTHING;
 
+-- O upload de evidências é realizado exclusivamente pela Edge Function com service_role.
+-- Não conceder INSERT direto em storage.objects a anon/authenticated: isso permitiria
+-- contornar a validação do token QR feita no fluxo público.
 DROP POLICY IF EXISTS "selfies_insert_publico" ON storage.objects;
-CREATE POLICY "selfies_insert_publico" ON storage.objects
-  FOR INSERT TO anon, authenticated
-  WITH CHECK (bucket_id = 'selfies-ponto');
+DROP FUNCTION IF EXISTS public.pode_enviar_selfie_ponto(text, text);
 
+UPDATE storage.buckets
+SET public = false,
+    file_size_limit = 5242880,
+    allowed_mime_types = ARRAY['image/jpeg', 'image/png', 'image/webp']
+WHERE id = 'selfies-ponto';
+
+-- Leitura de evidências apenas por quem supervisiona a operação da própria empresa.
+DROP POLICY IF EXISTS "selfies_select_empresa" ON storage.objects;
+CREATE POLICY "selfies_select_empresa" ON storage.objects
+  FOR SELECT TO authenticated
+  USING (
+    bucket_id = 'selfies-ponto'
+    AND (storage.foldername(name))[1] = public.empresa_atual()::text
+    AND EXISTS (
+      SELECT 1
+      FROM public.usuarios u
+      WHERE u.id = auth.uid()
+        AND u.empresa_id::text = (storage.foldername(name))[1]
+        AND u.ativo = true
+    )
+    AND public.tem_capacidade(auth.uid(), 'operacao.supervisionar')
+  );

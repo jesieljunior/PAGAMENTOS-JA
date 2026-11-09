@@ -210,8 +210,9 @@ function PaginaPlano() {
     );
   }
 
-  const { uso, ciclo, estimativa, planos, faturas, taxas } = data;
+  const { uso, ciclo, estimativa, planos, faturas, taxas, assinaturaStatus } = data;
   const planoAtualId = ciclo?.plano_id;
+  const assinaturaPendente = ["pendente", "aguardando_pagamento"].includes(assinaturaStatus ?? "");
 
   return (
     <AppShell
@@ -313,6 +314,7 @@ function PaginaPlano() {
             const ehPlanoAtual =
               p.id === planoAtualId ||
               p.nome.toLowerCase() === (uso?.plano_nome ?? "").toLowerCase();
+            const precisaFinalizarContratacao = ehPlanoAtual && assinaturaPendente;
 
             return (
               <article
@@ -385,7 +387,7 @@ function PaginaPlano() {
                 </div>
 
                 <div className="mt-6 pt-4 border-t border-border/60">
-                  {ehPlanoAtual ? (
+                  {ehPlanoAtual && !precisaFinalizarContratacao ? (
                     <Button
                       disabled
                       variant="outline"
@@ -419,6 +421,8 @@ function PaginaPlano() {
                           <Loader2 className="size-4 animate-spin" />
                           <span>Processando...</span>
                         </>
+                      ) : precisaFinalizarContratacao ? (
+                        <span>Finalizar contratação</span>
                       ) : p.mensalidade > 0 ? (
                         <span>Assinar</span>
                       ) : (

@@ -64,6 +64,7 @@ describe("Rotas de Ponto: /ponto.$token", () => {
       exigeSelfie: true,
       exigeGps: true,
       pontoBasico: false,
+      expiraEm: new Date(Date.now() + 60 * 60_000).toISOString(),
     });
 
     expect(tokenAssinado.startsWith("qr.")).toBe(true);
@@ -86,7 +87,9 @@ describe("Rotas de Ponto: /ponto.$token", () => {
       nome: "Evento Teste",
       data_inicio: new Date().toISOString(),
     };
-    const tokenAssinado = criarTokenQrCodeAssinado(evento);
+    const tokenAssinado = criarTokenQrCodeAssinado(evento, {
+      expiraEm: new Date(Date.now() + 60 * 60_000).toISOString(),
+    });
     const adulterado = tokenAssinado.slice(0, -4) + "XXXX";
     expect(decodificarTokenQrCode(adulterado)).toBeNull();
   });

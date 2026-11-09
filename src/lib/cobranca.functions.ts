@@ -3,6 +3,7 @@ import { z } from "zod";
 
 import type { Database, Tables } from "@/integrations/supabase/types";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
+import { isRecebimentoManualEmDinheiro } from "@/lib/asaas-payment-policy";
 import { requireOrganizationContext } from "./autorizacao.server";
 import { calcularFatura } from "./cobranca-v2";
 import { PLANOS_CATALOGO } from "./planos-catalogo";
@@ -149,6 +150,7 @@ export const carregarCobranca = createServerFn({ method: "GET" })
         faturas: [] as FaturaRow[],
         planos: (planosFinais ?? []) as PlanoRow[],
         taxas: [] as TaxaRow[],
+        assinaturaStatus: null as string | null,
       };
     };
 
@@ -174,7 +176,7 @@ export const carregarCobranca = createServerFn({ method: "GET" })
         }
       }
 
-      const [uso, ciclo, faturas, planos, taxas] = await Promise.all([
+      const [uso, ciclo, faturas, planos, taxas, assinatura] = await Promise.all([
         client.rpc("resumo_uso_empresa", { _empresa_id: empresaId }).then(async (r) => {
           if ((r?.error || !r?.data) && admin) {
             try {
@@ -254,6 +256,25 @@ export const carregarCobranca = createServerFn({ method: "GET" })
             }
             return r;
           }),
+        client
+          .from("assinaturas")
+          .select("status")
+          .eq("empresa_id", empresaId)
+          .maybeSingle()
+          .then(async (r) => {
+            if ((r?.error || !r?.data) && admin) {
+              try {
+                return await admin
+                  .from("assinaturas")
+                  .select("status")
+                  .eq("empresa_id", empresaId)
+                  .maybeSingle();
+              } catch {
+                return r;
+              }
+            }
+            return r;
+          }),
       ]);
 
       const resumo = uso?.data?.[0];
@@ -318,6 +339,7 @@ export const carregarCobranca = createServerFn({ method: "GET" })
         faturas: (faturas?.data ?? []) as FaturaRow[],
         planos: listaPlanos,
         taxas: (taxas?.data ?? []) as TaxaRow[],
+        assinaturaStatus: assinatura?.data?.status ?? null,
       };
     } catch (err) {
       console.warn("[carregarCobranca] Recuperando fallback com planos:", err);
@@ -361,36 +383,23 @@ export const selecionarPlanoEmpresa = createServerFn({ method: "POST" })
       }
     }
 
-    // Se o banco ainda não tiver a tabela populada, resolve pelo catálogo oficial
+    // Se o ID recebido for do catálogo estático antigo, resolve pelo código
+    // persistido. Nunca cria assinatura apontando para um plano inexistente.
     if (!plano) {
       const planoCat = PLANOS_CATALOGO.find(
         (p) => p.id === data.planoId || p.codigo === data.planoId,
       );
       if (planoCat) {
-        plano = {
-          id: planoCat.id,
-          codigo: planoCat.codigo,
-          nome: planoCat.nome,
-          descricao: planoCat.descricao,
-          mensalidade: planoCat.mensalidade,
-          dias_trial: planoCat.dias_trial,
-          participacoes_incluidas: planoCat.participacoes_incluidas,
-          valor_excedente: planoCat.valor_excedente,
-          limite_eventos_ciclo: planoCat.limite_eventos_ciclo,
-          limite_pessoas_evento: planoCat.limite_pessoas_evento,
-          limite_clt: planoCat.limite_clt,
-          limite_supervisores: planoCat.limite_supervisores,
-          retencao_evidencias_dias: 30,
-          aviso_vendas_acima: null,
-          recursos: planoCat.recursos,
-          ativo: true,
-          ordem: 1,
-          percentual: 0,
-          taxa_fixa_pix: 0,
-          modelo: "assinatura_percentual" as const,
-          criado_em: new Date().toISOString(),
-          atualizado_em: new Date().toISOString(),
-        } as PlanoRow;
+        const consultaPorCodigo = await (admin ?? client)
+          .from("planos")
+          .select("*")
+          .eq("codigo", planoCat.codigo)
+          .eq("ativo", true)
+          .maybeSingle();
+        if (consultaPorCodigo.error) {
+          throw new Error("Não foi possível consultar o plano no catálogo persistido.");
+        }
+        plano = consultaPorCodigo.data;
       }
     }
 
@@ -399,14 +408,121 @@ export const selecionarPlanoEmpresa = createServerFn({ method: "POST" })
     }
 
     const ehGratuito = plano.codigo === "free" || plano.mensalidade === 0;
-    const trialAte = ehGratuito
-      ? new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString()
-      : null;
 
-    // Consulta assinatura existente da agência
+    // Antes de criar outra cobrança, reconcilia qualquer fatura ainda pendente.
+    // Uma resposta perdida do Asaas nunca deve gerar uma segunda cobrança automática.
+    {
+      const consultaFaturaPendente = await (admin ?? client)
+        .from("faturas_plataforma")
+        .select("id, plano_id, total, status, referencia_provedor, vencimento")
+        .eq("empresa_id", empresaId)
+        .in("status", ["pendente", "atrasada"])
+        .order("criado_em", { ascending: false })
+        .limit(2)
+        .maybeSingle();
+
+      if (consultaFaturaPendente.error) {
+        throw new Error("Não foi possível verificar cobranças SaaS pendentes.");
+      }
+
+      const faturaPendente = consultaFaturaPendente.data;
+      if (faturaPendente) {
+        if (faturaPendente.plano_id !== plano.id) {
+          throw new Error(
+            "Existe uma fatura SaaS pendente de outro plano. Regularize ou cancele essa cobrança antes de trocar de plano.",
+          );
+        }
+        if (plano.mensalidade <= 0) {
+          throw new Error(
+            "Existe uma fatura SaaS pendente vinculada ao plano gratuito. A troca está bloqueada até a reconciliação dessa cobrança.",
+          );
+        }
+
+        const { buscarCobrancaPorReferencia, obterPixQrCode } = await import("./asaas.server");
+        const resultadoBusca = await buscarCobrancaPorReferencia(faturaPendente.id);
+        const cobrancasEncontradas = resultadoBusca.data ?? [];
+
+        if (cobrancasEncontradas.length !== 1) {
+          throw new Error(
+            "Já existe uma fatura pendente, mas a cobrança correspondente não pôde ser conciliada com segurança. Não foi criada outra cobrança; é necessária reconciliação.",
+          );
+        }
+
+        const cobrancaExistente = cobrancasEncontradas[0]!;
+        const valorExistente = Number(cobrancaExistente.value);
+        if (
+          cobrancaExistente.externalReference !== faturaPendente.id ||
+          !Number.isFinite(valorExistente) ||
+          Math.abs(valorExistente - Number(faturaPendente.total)) >= 0.005
+        ) {
+          throw new Error(
+            "A cobrança encontrada no Asaas diverge da fatura pendente. A criação de uma nova cobrança foi bloqueada.",
+          );
+        }
+
+        if (!["PENDING", "OVERDUE"].includes(cobrancaExistente.status)) {
+          throw new Error(
+            `A cobrança existente está com status ${cobrancaExistente.status}. Aguarde a conciliação do webhook antes de tentar novamente.`,
+          );
+        }
+
+        if (
+          faturaPendente.referencia_provedor &&
+          faturaPendente.referencia_provedor !== cobrancaExistente.id
+        ) {
+          throw new Error("A referência Asaas da fatura diverge da cobrança localizada.");
+        }
+
+        const dadosReferencia = {
+          referencia_provedor: cobrancaExistente.id,
+          provedor: "asaas",
+          atualizado_em: new Date().toISOString(),
+        };
+        const persistenciaReferencia = admin
+          ? await admin
+              .from("faturas_plataforma")
+              .update(dadosReferencia)
+              .eq("id", faturaPendente.id)
+              .eq("empresa_id", empresaId)
+          : await client
+              .from("faturas_plataforma")
+              .update(dadosReferencia)
+              .eq("id", faturaPendente.id)
+              .eq("empresa_id", empresaId);
+
+        if (persistenciaReferencia.error) {
+          throw new Error(
+            "A cobrança foi localizada, mas a referência não pôde ser persistida. Não será criada outra cobrança.",
+          );
+        }
+
+        const pixExistente = await obterPixQrCode(cobrancaExistente.id);
+        if (!pixExistente.payload && !cobrancaExistente.invoiceUrl) {
+          throw new Error(
+            "A cobrança foi localizada, mas o Asaas não retornou checkout nem QR Code Pix. É necessária reconciliação antes de tentar novamente.",
+          );
+        }
+
+        return {
+          ok: true,
+          planoNome: plano.nome,
+          mensalidade: plano.mensalidade,
+          cobranca: {
+            faturaId: faturaPendente.id,
+            valor: valorExistente,
+            pixCopiaCola: pixExistente.payload || "",
+            checkoutUrl: cobrancaExistente.invoiceUrl || `/plano?fatura=${faturaPendente.id}`,
+            vencimento: faturaPendente.vencimento,
+          },
+        };
+      }
+    }
+
+    // Consulta assinatura existente da agência. O prazo do trial é histórico:
+    // selecionar novamente o plano gratuito não pode reiniciar os 7 dias.
     let { data: assinaturaExistente } = await client
       .from("assinaturas")
-      .select("id, plano_id, status")
+      .select("id, plano_id, status, trial_ate")
       .eq("empresa_id", empresaId)
       .maybeSingle();
 
@@ -414,7 +530,7 @@ export const selecionarPlanoEmpresa = createServerFn({ method: "POST" })
       try {
         const resAssAdmin = await admin
           .from("assinaturas")
-          .select("id, plano_id, status")
+          .select("id, plano_id, status, trial_ate")
           .eq("empresa_id", empresaId)
           .maybeSingle();
         assinaturaExistente = resAssAdmin.data;
@@ -422,6 +538,12 @@ export const selecionarPlanoEmpresa = createServerFn({ method: "POST" })
         // ignora
       }
     }
+
+    const trialAte = ehGratuito
+      ? assinaturaExistente
+        ? assinaturaExistente.trial_ate
+        : new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString()
+      : null;
 
     const patchAssinatura = {
       plano_id: plano.id,
@@ -431,43 +553,91 @@ export const selecionarPlanoEmpresa = createServerFn({ method: "POST" })
     };
 
     if (assinaturaExistente) {
-      const { error: erroUpdate } = await client
+      let assinaturaAtualizada = false;
+      let erroAtualizacaoAssinatura: string | null = null;
+
+      const resultadoUpdateCliente = await client
         .from("assinaturas")
         .update(patchAssinatura)
-        .eq("id", assinaturaExistente.id);
+        .eq("id", assinaturaExistente.id)
+        .select("id")
+        .maybeSingle();
 
-      if (erroUpdate && admin) {
-        try {
-          const { error: erroAdmin } = await admin
-            .from("assinaturas")
-            .update(patchAssinatura)
-            .eq("id", assinaturaExistente.id);
-          if (erroAdmin) throw new Error(erroAdmin.message);
-        } catch {
-          // prossegue
+      if (resultadoUpdateCliente.error) {
+        erroAtualizacaoAssinatura = resultadoUpdateCliente.error.message;
+      } else if (resultadoUpdateCliente.data?.id) {
+        assinaturaAtualizada = true;
+      }
+
+      if (!assinaturaAtualizada && admin) {
+        const resultadoUpdateAdmin = await admin
+          .from("assinaturas")
+          .update(patchAssinatura)
+          .eq("id", assinaturaExistente.id)
+          .select("id")
+          .maybeSingle();
+
+        if (resultadoUpdateAdmin.error) {
+          erroAtualizacaoAssinatura = resultadoUpdateAdmin.error.message;
+        } else if (resultadoUpdateAdmin.data?.id) {
+          assinaturaAtualizada = true;
         }
       }
+
+      if (!assinaturaAtualizada) {
+        throw new Error(
+          `Não foi possível atualizar a assinatura existente: ${erroAtualizacaoAssinatura ?? "Nenhuma assinatura foi atualizada."}`,
+        );
+      }
     } else {
-      const { error: erroInsert } = await client.from("assinaturas").insert({
+      const novaAssinaturaPayload = {
         empresa_id: empresaId,
         plano_id: plano.id,
         status: ehGratuito ? "trial" : "pendente",
         trial_ate: trialAte,
-      });
+      };
 
-      if (erroInsert && admin) {
-        try {
-          const { error: erroAdmin } = await admin.from("assinaturas").insert({
-            empresa_id: empresaId,
-            plano_id: plano.id,
-            status: ehGratuito ? "trial" : "pendente",
-            trial_ate: trialAte,
-          });
-          if (erroAdmin) throw new Error(erroAdmin.message);
-        } catch {
-          // prossegue
+      let novaAssinatura: {
+        id: string;
+        plano_id: string | null;
+        status: string;
+        trial_ate: string | null;
+      } | null = null;
+      let erroCriacaoAssinatura: string | null = null;
+
+      const resultadoCliente = await client
+        .from("assinaturas")
+        .insert(novaAssinaturaPayload)
+        .select("id, plano_id, status, trial_ate")
+        .maybeSingle();
+
+      if (resultadoCliente.error) {
+        erroCriacaoAssinatura = resultadoCliente.error.message;
+      } else if (resultadoCliente.data?.id) {
+        novaAssinatura = resultadoCliente.data;
+      }
+
+      if (!novaAssinatura && admin) {
+        const resultadoAdmin = await admin
+          .from("assinaturas")
+          .insert(novaAssinaturaPayload)
+          .select("id, plano_id, status, trial_ate")
+          .maybeSingle();
+
+        if (resultadoAdmin.error) {
+          erroCriacaoAssinatura = resultadoAdmin.error.message;
+        } else if (resultadoAdmin.data?.id) {
+          novaAssinatura = resultadoAdmin.data;
         }
       }
+
+      if (!novaAssinatura) {
+        throw new Error(
+          `Não foi possível criar a assinatura da empresa: ${erroCriacaoAssinatura ?? "ID da assinatura não retornado."}`,
+        );
+      }
+
+      assinaturaExistente = novaAssinatura;
     }
 
     // Abre novo ciclo com o plano escolhido
@@ -525,58 +695,55 @@ export const selecionarPlanoEmpresa = createServerFn({ method: "POST" })
       const vencimentoIso = new Date(Date.now() + 3 * 24 * 60 * 60_000).toISOString();
       const cicloFimIso = new Date(Date.now() + 30 * 24 * 60 * 60_000).toISOString();
 
-      try {
-        const { data: faturaInserida } = await client
+      const faturaPayload = {
+        id: faturaId,
+        empresa_id: empresaId,
+        assinatura_id: assinaturaExistente.id,
+        plano_id: plano.id,
+        plano_nome: plano.nome,
+        ciclo_inicio: agoraIso,
+        ciclo_fim: cicloFimIso,
+        vencimento: vencimentoIso.split("T")[0]!,
+        mensalidade: plano.mensalidade,
+        participacoes_incluidas: plano.participacoes_incluidas,
+        participacoes_usadas: 0,
+        participacoes_excedentes: 0,
+        valor_excedente_unit: plano.valor_excedente,
+        valor_excedente_total: 0,
+        total: plano.mensalidade,
+        status: "pendente" as const,
+        provedor: "asaas" as const,
+      };
+
+      let faturaPersistida = false;
+      const resultadoFaturaCliente = await client
+        .from("faturas_plataforma")
+        .insert(faturaPayload)
+        .select("id")
+        .maybeSingle();
+
+      if (!resultadoFaturaCliente.error && resultadoFaturaCliente.data?.id) {
+        faturaId = resultadoFaturaCliente.data.id;
+        faturaPersistida = true;
+      }
+
+      if (!faturaPersistida && admin) {
+        const resultadoFaturaAdmin = await admin
           .from("faturas_plataforma")
-          .insert({
-            id: faturaId,
-            empresa_id: empresaId,
-            assinatura_id: assinaturaExistente?.id ?? null,
-            plano_id: plano.id,
-            plano_nome: plano.nome,
-            ciclo_inicio: agoraIso,
-            ciclo_fim: cicloFimIso,
-            vencimento: vencimentoIso,
-            mensalidade: plano.mensalidade,
-            participacoes_incluidas: plano.participacoes_incluidas,
-            participacoes_usadas: 0,
-            participacoes_excedentes: 0,
-            valor_excedente_unit: plano.valor_excedente,
-            valor_excedente_total: 0,
-            total: plano.mensalidade,
-            status: "pendente",
-            provedor: "asaas",
-          })
+          .insert(faturaPayload)
           .select("id")
           .maybeSingle();
 
-        if (faturaInserida?.id) faturaId = faturaInserida.id;
-      } catch (errFatura) {
-        if (admin) {
-          try {
-            await admin.from("faturas_plataforma").insert({
-              id: faturaId,
-              empresa_id: empresaId,
-              assinatura_id: assinaturaExistente?.id ?? null,
-              plano_id: plano.id,
-              plano_nome: plano.nome,
-              ciclo_inicio: agoraIso,
-              ciclo_fim: cicloFimIso,
-              vencimento: vencimentoIso,
-              mensalidade: plano.mensalidade,
-              participacoes_incluidas: plano.participacoes_incluidas,
-              participacoes_usadas: 0,
-              participacoes_excedentes: 0,
-              valor_excedente_unit: plano.valor_excedente,
-              valor_excedente_total: 0,
-              total: plano.mensalidade,
-              status: "pendente",
-              provedor: "asaas",
-            });
-          } catch {
-            // segue com dados em memória
-          }
+        if (!resultadoFaturaAdmin.error && resultadoFaturaAdmin.data?.id) {
+          faturaId = resultadoFaturaAdmin.data.id;
+          faturaPersistida = true;
         }
+      }
+
+      if (!faturaPersistida) {
+        const detalhe =
+          resultadoFaturaCliente.error?.message ?? "O banco não retornou o ID da fatura.";
+        throw new Error(detalhe);
       }
 
       // Consulta dados cadastrais da empresa para emissão real no Asaas
@@ -622,6 +789,44 @@ export const selecionarPlanoEmpresa = createServerFn({ method: "POST" })
           descricao: `Assinatura Plano ${plano.nome} — Já Gestão`,
           referenciaExterna: faturaId,
         });
+
+        // Persiste o ID do Asaas para conciliação direta. Se esta gravação falhar,
+        // não recria a cobrança: o webhook e a confirmação manual ainda podem
+        // localizar a fatura pela externalReference (faturaId).
+        if (cobrancaAsaas.id) {
+          const dadosReferencia = {
+            referencia_provedor: cobrancaAsaas.id,
+            provedor: "asaas",
+            atualizado_em: new Date().toISOString(),
+          };
+          let referenciaPersistida = false;
+
+          if (admin) {
+            const { error } = await admin
+              .from("faturas_plataforma")
+              .update(dadosReferencia)
+              .eq("id", faturaId)
+              .eq("empresa_id", empresaId);
+            referenciaPersistida = !error;
+            if (error) {
+              console.error("[selecionarPlanoEmpresa] Falha ao persistir referência Asaas:", error);
+            }
+          }
+
+          if (!referenciaPersistida) {
+            const { error } = await client
+              .from("faturas_plataforma")
+              .update(dadosReferencia)
+              .eq("id", faturaId)
+              .eq("empresa_id", empresaId);
+            if (error) {
+              console.error(
+                "[selecionarPlanoEmpresa] Referência Asaas não persistida; conciliação usará externalReference:",
+                error,
+              );
+            }
+          }
+        }
 
         if (cobrancaAsaas.invoiceUrl) {
           checkoutUrlReal = cobrancaAsaas.invoiceUrl;
@@ -705,63 +910,69 @@ export const confirmarPagamentoFaturaPlano = createServerFn({ method: "POST" })
       return { ok: true, jaPaga: true, status: "pago" };
     }
 
-    const ehPlataforma = Boolean(
-      context.contexto?.platformContext ||
-      context.contexto?.papeisPlataforma?.includes("admin_master"),
-    );
-
     let confirmadoGateway = false;
     let parceiroPagamentoId: string | null = fatura.referencia_provedor || null;
+    let valorConfirmadoGateway: number | null = null;
 
-    if (ehPlataforma) {
-      // Administrador da plataforma realizando conciliação manual autorizada
-      confirmadoGateway = true;
-    } else {
-      // Validação real e obrigatória com a API oficial do Asaas
-      try {
-        const { buscarCobrancaPorReferencia, obterCobrancaAsaas } = await import("./asaas.server");
-        const statusPagosAsaas = new Set(["RECEIVED", "CONFIRMED", "RECEIVED_IN_CASH"]);
+    // A mesma validação do provedor é obrigatória para qualquer usuário.
+    // Conciliação manual deve ser uma operação administrativa separada, com evidência e trilha próprias.
+    try {
+      const { buscarCobrancaPorReferencia, obterCobrancaAsaas } = await import("./asaas.server");
+      const statusPagosAsaas = new Set(["RECEIVED", "CONFIRMED"]);
 
-        // Tenta buscar pelo referencia_provedor caso já registrado
-        if (fatura.referencia_provedor) {
-          try {
-            const cobranca = await obterCobrancaAsaas(fatura.referencia_provedor);
-            if (cobranca && statusPagosAsaas.has(cobranca.status)) {
-              confirmadoGateway = true;
-              parceiroPagamentoId = cobranca.id;
-            }
-          } catch {
-            // Continua para busca por externalReference
-          }
-        }
-
-        // Se ainda não confirmado, busca por externalReference (faturaId)
-        if (!confirmadoGateway) {
-          const resultado = await buscarCobrancaPorReferencia(data.faturaId);
-          const cobranca = resultado.data?.[0];
-          if (cobranca && statusPagosAsaas.has(cobranca.status)) {
+      if (fatura.referencia_provedor) {
+        try {
+          const cobranca = await obterCobrancaAsaas(fatura.referencia_provedor);
+          if (
+            cobranca &&
+            Boolean(cobranca.billingType) &&
+            !isRecebimentoManualEmDinheiro(cobranca.billingType) &&
+            statusPagosAsaas.has(cobranca.status) &&
+            cobranca.externalReference === data.faturaId &&
+            Number.isFinite(Number(cobranca.value)) &&
+            Math.abs(Number(cobranca.value) - Number(fatura.total)) < 0.005
+          ) {
             confirmadoGateway = true;
             parceiroPagamentoId = cobranca.id;
+            valorConfirmadoGateway = Number(cobranca.value);
           }
+        } catch {
+          // Continua para busca por externalReference
         }
-      } catch (errGateway) {
-        console.error(
-          "[confirmarPagamentoFaturaPlano] Erro ao consultar gateway Asaas:",
-          errGateway,
-        );
-        throw new Error(
-          "Não foi possível validar o pagamento com o Asaas no momento. Tente novamente em instantes.",
-        );
       }
 
       if (!confirmadoGateway) {
-        throw new Error(
-          "Pagamento ainda não confirmado pelo Asaas. Se você já realizou o pagamento via Pix ou Cartão, aguarde alguns instantes pela compensação bancária e tente novamente.",
-        );
+        const resultado = await buscarCobrancaPorReferencia(data.faturaId);
+        const cobranca = resultado.data?.[0];
+        if (
+          cobranca &&
+          Boolean(cobranca.billingType) &&
+          !isRecebimentoManualEmDinheiro(cobranca.billingType) &&
+          statusPagosAsaas.has(cobranca.status) &&
+          cobranca.externalReference === data.faturaId &&
+          Number.isFinite(Number(cobranca.value)) &&
+          Math.abs(Number(cobranca.value) - Number(fatura.total)) < 0.005
+        ) {
+          confirmadoGateway = true;
+          parceiroPagamentoId = cobranca.id;
+          valorConfirmadoGateway = Number(cobranca.value);
+        }
       }
+    } catch (errGateway) {
+      console.error("[confirmarPagamentoFaturaPlano] Erro ao consultar gateway Asaas:", errGateway);
+      throw new Error(
+        "Não foi possível validar o pagamento com o Asaas no momento. Tente novamente em instantes.",
+      );
+    }
+
+    if (!confirmadoGateway || valorConfirmadoGateway === null) {
+      throw new Error("Pagamento ainda não confirmado pelo Asaas com o valor integral da fatura.");
     }
 
     // 2. Liquidação atômica da fatura e ativação da assinatura
+    if (!parceiroPagamentoId) {
+      throw new Error("Asaas não retornou o identificador da cobrança confirmada.");
+    }
     const agoraIso = new Date().toISOString();
     let liquidadoViaRpc = false;
 
@@ -771,8 +982,8 @@ export const confirmarPagamentoFaturaPlano = createServerFn({ method: "POST" })
         "liquidar_fatura_plataforma_asaas",
         {
           _fatura_id: data.faturaId,
-          _parceiro_id: parceiroPagamentoId || `manual_${data.metodo}`,
-          _valor: fatura.total,
+          _parceiro_id: parceiroPagamentoId,
+          _valor: valorConfirmadoGateway,
         },
       );
       if (!errRpc && resRpc?.ok) {
@@ -783,22 +994,9 @@ export const confirmarPagamentoFaturaPlano = createServerFn({ method: "POST" })
     }
 
     if (!liquidadoViaRpc) {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      await (dbClient.from("faturas_plataforma") as any)
-        .update({
-          status: "pago",
-          referencia_provedor: parceiroPagamentoId || fatura.referencia_provedor,
-          provedor: "asaas",
-          pago_em: agoraIso,
-          atualizado_em: agoraIso,
-        })
-        .eq("id", data.faturaId)
-        .eq("empresa_id", empresaId);
-
-      await dbClient
-        .from("assinaturas")
-        .update({ status: "ativa", atualizado_em: agoraIso })
-        .eq("empresa_id", empresaId);
+      throw new Error(
+        "Liquidação atômica indisponível. A fatura permanece pendente para nova tentativa.",
+      );
     }
 
     // 3. Auditoria
@@ -806,10 +1004,8 @@ export const confirmarPagamentoFaturaPlano = createServerFn({ method: "POST" })
       await dbClient.from("logs_auditoria").insert({
         empresa_id: empresaId,
         ator_id: context.userId,
-        ator_contexto: ehPlataforma ? "plataforma" : "organizacao",
-        acao: ehPlataforma
-          ? "fatura_plano_conciliada_manual"
-          : `fatura_plano_confirmada_${data.metodo}`,
+        ator_contexto: "organizacao",
+        acao: `fatura_plano_confirmada_${data.metodo}`,
         recurso_tipo: "fatura_plataforma",
         recurso_id: data.faturaId,
         resultado: "sucesso",

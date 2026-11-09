@@ -1,4 +1,5 @@
 export type EventoAsaasWebhook = {
+  id?: string;
   event?: string;
   payment?: {
     id?: string;
@@ -20,9 +21,19 @@ function normalizarValor(value: unknown): string {
 }
 
 export function gerarChaveWebhookAsaas(payload: EventoAsaasWebhook): string {
-  const evento = payload.event ?? "";
+  // O Asaas mantém o mesmo id quando reentrega o mesmo evento.
+  if (payload.id?.trim()) return `asaas-event:${payload.id.trim()}`;
+
+  // Compatibilidade com payloads antigos sem id: exige referência de recurso.
+  const evento = payload.event?.trim() ?? "";
   const payment = payload.payment ?? {};
   const transfer = payload.transfer ?? {};
+  const referenciaRecurso =
+    payment.id ?? payment.externalReference ?? transfer.id ?? transfer.externalReference;
+
+  if (!evento || !referenciaRecurso) {
+    throw new Error("Webhook Asaas sem ID de evento ou referência de recurso válida.");
+  }
 
   const partes = [
     "asaas-webhook",
