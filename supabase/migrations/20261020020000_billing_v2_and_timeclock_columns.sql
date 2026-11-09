@@ -538,7 +538,7 @@ BEGIN
   RETURN NEW;
 END; $$;
 DROP TRIGGER IF EXISTS tg_user_roles_limite_supervisores ON public.user_roles;
-CREATE TRIGGER tg_user_roles_limite_supervisores BEFORE INSERT ON public.user_roles
+CREATE TRIGGER tg_user_roles_limite_supervisores BEFORE INSERT OR UPDATE OF role, user_id ON public.user_roles
   FOR EACH ROW EXECUTE FUNCTION public.tg_user_roles_limite_supervisores();
 
 -- Recursos financeiros bloqueados no banco conforme plano
