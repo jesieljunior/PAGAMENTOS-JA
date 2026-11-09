@@ -289,7 +289,7 @@ export const Route = createFileRoute("/api/public/webhooks/asaas")({
                   acao: "cobranca_operacional_duplicada",
                   recurso_tipo: "cobranca",
                   recurso_id: cobrancaLocal.id,
-                  resultado: "alerta",
+                  resultado: "falha",
                   detalhes: {
                     parceiro_original: cobrancaLocal.parceiro_cobranca_id,
                     parceiro_duplicado: parceiroId,
@@ -322,11 +322,27 @@ export const Route = createFileRoute("/api/public/webhooks/asaas")({
               .neq("status", "pago");
 
             // Atualiza também faturas SaaS ainda não liquidadas.
+            const atualizacaoFatura = {
+              status: "atrasada",
+              atualizado_em: new Date().toISOString(),
+            };
+
+            // O ID da cobrança Asaas pode ainda não estar gravado na fatura
+            // quando o evento de vencimento chegar. externalReference é o ID
+            // local da fatura e permite localizar o registro sem ambiguidade.
             await supabaseAdmin
               .from("faturas_plataforma")
-              .update({ status: "vencida", atualizado_em: new Date().toISOString() })
+              .update(atualizacaoFatura)
               .eq("referencia_provedor", corpo.payment.id)
-              .not("status", "in", '("pago","paga")');
+              .in("status", ["pendente", "atrasada"]);
+
+            if (corpo.payment.externalReference) {
+              await supabaseAdmin
+                .from("faturas_plataforma")
+                .update(atualizacaoFatura)
+                .eq("id", corpo.payment.externalReference)
+                .in("status", ["pendente", "atrasada"]);
+            }
           }
 
           // 3. Eventos de transferência: a consulta pontual ao Asaas determina
