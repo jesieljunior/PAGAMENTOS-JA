@@ -92,7 +92,7 @@ export const concluirCadastroComEmpresaEPlano = createServerFn({ method: "POST" 
 
     const dadosAssinatura = {
       plano_id: planoEscolhido.id,
-      status: ehGratuito ? "trial" : "ativa",
+      status: ehGratuito ? "trial" : "pendente",
       trial_ate: trialAte,
       observacoes: ehGratuito
         ? `Plano gratuito com ${DIAS_TRIAL_PADRAO} dias de teste completo.`
