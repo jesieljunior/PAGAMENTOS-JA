@@ -13,7 +13,7 @@ async function executarPurgar(request: Request): Promise<Response> {
     .from("pontos")
     .select("id, foto_url")
     .or("foto_url.not.is.null,gps_lat.not.is.null,gps_lng.not.is.null")
-    .lte("selfie_expira_em", agoraIso)
+    .lte("evidencia_expira_em", agoraIso)
     .limit(500);
   if (error) return Response.json({ error: error.message }, { status: 500 });
 
