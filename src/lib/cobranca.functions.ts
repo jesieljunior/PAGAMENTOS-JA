@@ -598,7 +598,7 @@ export const selecionarPlanoEmpresa = createServerFn({ method: "POST" })
         .eq("empresa_id", empresaId)
         .in("status", ["pendente", "atrasada"])
         .order("criado_em", { ascending: false })
-        .limit(1)
+        .limit(2)
         .maybeSingle();
 
       if (consultaFaturaPendente.error && admin) {
@@ -608,7 +608,7 @@ export const selecionarPlanoEmpresa = createServerFn({ method: "POST" })
           .eq("empresa_id", empresaId)
           .in("status", ["pendente", "atrasada"])
           .order("criado_em", { ascending: false })
-          .limit(1)
+          .limit(2)
           .maybeSingle();
       }
 
