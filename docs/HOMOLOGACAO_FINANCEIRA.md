@@ -37,6 +37,17 @@ HAVING COUNT(*) > 1;
 
 Resultado esperado: nenhuma linha. Se houver duplicidades, não apague lançamentos para fazer a migration passar. Reconcilie cada pagamento com o fechamento e a transferência correspondente no Asaas.
 
+Verifique também a integridade dos atores nos logs antes de validar a constraint de auditoria:
+
+```sql
+SELECT id, ator_contexto, acao, criado_em
+FROM public.logs_auditoria
+WHERE ator_id IS NULL
+  AND ator_contexto <> 'sistema';
+```
+
+Resultado esperado: nenhuma linha. Registros antigos sem ator humano devem ser reconciliados; não os reclassifique automaticamente como eventos de sistema.
+
 Verifique também se um mesmo ID de cobrança Asaas foi associado a mais de um registro local:
 
 ```sql
