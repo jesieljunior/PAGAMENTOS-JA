@@ -115,7 +115,8 @@ export const salvarCredenciaisMercadoPago = createServerFn({ method: "POST" })
       operacao = await supabaseAdmin.from("mercado_pago_contas").insert({
         empresa_id: empresaId,
         mercado_pago_user_id: userIdIdentificador,
-        access_token_cifrado: data.accessToken,
+        access_token_cifrado: accessTokenCifrado,
+        client_secret_cifrado: clientSecretCifrado,
         escopos: JSON.stringify({
           ambiente: data.ambiente,
           publicKey: data.publicKey ?? null,
