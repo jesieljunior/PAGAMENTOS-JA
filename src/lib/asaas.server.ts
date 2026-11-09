@@ -220,6 +220,7 @@ export async function buscarCobrancaPorReferencia(referenciaExterna: string) {
     data: Array<{
       id: string;
       status: string;
+      billingType: string;
       paymentDate?: string;
       value?: number;
       externalReference?: string;
