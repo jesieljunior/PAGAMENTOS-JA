@@ -14,6 +14,7 @@ import {
   EVENTOS_FATURA_SAAS,
   STATUS_CREDITO_SALDO,
   STATUS_FATURA_SAAS,
+  isRecebimentoManualEmDinheiro,
 } from "@/lib/asaas-payment-policy";
 
 type EventoAsaas = EventoAsaasWebhook;
@@ -227,6 +228,11 @@ export const Route = createFileRoute("/api/public/webhooks/asaas")({
             if (faturaPlataforma) {
               const { obterCobrancaAsaas } = await import("@/lib/asaas.server");
               const cobrancaVerificada = await obterCobrancaAsaas(parceiroId);
+              if (isRecebimentoManualEmDinheiro(cobrancaVerificada.billingType)) {
+                throw new Error(
+                  "Recebimento manual em dinheiro não liquida fatura SaaS automaticamente.",
+                );
+              }
               const statusAceitos = STATUS_FATURA_SAAS;
               const valorAsaas = Number(cobrancaVerificada.value);
 
@@ -288,6 +294,11 @@ export const Route = createFileRoute("/api/public/webhooks/asaas")({
             if (cobrancaLocal) {
               const { obterCobrancaAsaas } = await import("@/lib/asaas.server");
               const remota = await obterCobrancaAsaas(parceiroId);
+              if (isRecebimentoManualEmDinheiro(remota.billingType)) {
+                throw new Error(
+                  "Recebimento manual em dinheiro não pode liberar funding operacional.",
+                );
+              }
               const valorAsaas = Number(remota.value);
 
               if (
