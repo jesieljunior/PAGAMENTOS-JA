@@ -684,6 +684,12 @@ export const selecionarPlanoEmpresa = createServerFn({ method: "POST" })
         }
 
         const pixExistente = await obterPixQrCode(cobrancaExistente.id);
+        if (!pixExistente.payload && !cobrancaExistente.invoiceUrl) {
+          throw new Error(
+            "A cobrança foi localizada, mas o Asaas não retornou checkout nem QR Code Pix. É necessária reconciliação antes de tentar novamente.",
+          );
+        }
+
         return {
           ok: true,
           planoNome: plano.nome,
