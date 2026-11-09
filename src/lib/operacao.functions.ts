@@ -328,6 +328,9 @@ export const rotacionarQrEvento = createServerFn({ method: "POST" })
     if (!evento || evento.empresa_id !== contexto.empresaId) {
       throw new Error("Evento não encontrado.");
     }
+    if (["fechamento", "pagamento", "concluido", "arquivado", "cancelado"].includes(evento.status)) {
+      throw new Error("Não é possível gerar QR Code para um evento encerrado ou cancelado.");
+    }
 
     const agora = Date.now();
     const geradoEm = new Date(agora);
