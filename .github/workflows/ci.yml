@@ -69,3 +69,22 @@ jobs:
 
       - name: Executar Testes Automatizados (Vitest)
         run: npm run test
+
+  database-migrations:
+    name: Aplicar migrations em Supabase local
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout do Repositório
+        uses: actions/checkout@v4
+
+      - name: Configurar Supabase CLI
+        uses: supabase/setup-cli@v1
+        with:
+          version: latest
+
+      - name: Iniciar Supabase local
+        run: supabase start -x studio,imgproxy,mailpit,logflare,vector
+
+      - name: Aplicar todas as migrations em banco limpo
+        run: supabase db reset
