@@ -9,7 +9,23 @@ DO $$ BEGIN
  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid='public.logs_auditoria'::regclass AND conname='logs_auditoria_ator_sistema_check') THEN
   ALTER TABLE public.logs_auditoria ADD CONSTRAINT logs_auditoria_ator_sistema_check CHECK (ator_id IS NOT NULL OR ator_contexto='sistema') NOT VALID;
  END IF;
-END $$;
+END $;
+
+DO $
+BEGIN
+  IF EXISTS (
+    SELECT 1
+    FROM public.logs_auditoria
+    WHERE ator_id IS NULL AND ator_contexto <> 'sistema'
+  ) THEN
+    RAISE EXCEPTION
+      'Há logs sem ator humano fora do contexto sistema. Reconcilie a auditoria antes de validar a constraint.';
+  END IF;
+END;
+$;
+
+ALTER TABLE public.logs_auditoria
+  VALIDATE CONSTRAINT logs_auditoria_ator_sistema_check;
 
 -- Não cria índice único às cegas se já houver duplicidade histórica.
 DO $$
