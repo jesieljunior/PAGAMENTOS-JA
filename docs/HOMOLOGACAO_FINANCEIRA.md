@@ -52,6 +52,21 @@ Confirme que todas as migrations anteriores do projeto foram aplicadas. Para est
 
 A migration final não configura nem altera credenciais do Mercado Pago. A aplicação está sendo homologada com Asaas.
 
+### Estado observado do projeto de teste
+
+A inspeção foi feita em modo somente leitura no projeto **JÁ - BANCO DE DADOS**.
+
+- O histórico retornado pelo Supabase está vazio e a relação `supabase_migrations.schema_migrations` não existe. Portanto, não é possível usar o histórico padrão para decidir quais arquivos já foram aplicados.
+- O schema está parcialmente adiantado: `tentativas_ponto_publico`, `auditoria_ponto_publico` e as colunas de QR Code/evidência já existem.
+- As tabelas centrais do Billing V2 — `faturas_plataforma`, `participacoes_operacionais` e `ciclos_cobranca` — ainda não existem.
+- O enum `status_pagamento` ainda contém somente `pendente`, `agendado`, `executado` e `falhou`.
+- As policies restritivas de leitura de fechamentos e pagamentos já existem, criadas por uma migration anterior. A migration Billing V2 foi ajustada para substituí-las sem erro.
+- A tabela `webhook_eventos` já existe e ainda possui a policy antiga de inserção por usuários autenticados. A migration de resiliência agora revoga esse acesso e reserva a escrita ao backend com `service_role`.
+
+Não execute o conjunto de migrations como se o banco estivesse vazio. A migration Billing V2 foi ajustada para tolerar as duas tabelas de ponto já existentes e para substituir as policies que já estavam instaladas. A sequência final ainda depende da conferência de todas as estruturas anteriores e da validação do fluxo de faturamento.
+
+A migration `20261104130000` agora verifica duplicidades de débito/crédito por pagamento antes de criar os índices únicos. A migration final também verifica duplicidade de crédito por cobrança. Nenhum lançamento é removido automaticamente.
+
 A migration final também ajusta a auditoria para permitir `ator_id = NULL` exclusivamente em eventos automáticos (`ator_contexto = 'sistema'`). Ações atribuídas a usuários continuam exigindo identificador de ator. O identificador do recurso é gravado como UUID, e os resultados de auditoria respeitam os valores aceitos (`sucesso` e `falha`).
 
 **Importante:** o banco de teste consultado ainda não possui `faturas_plataforma` e não apresenta os três novos estados de `status_pagamento`. Portanto, ele ainda não está pronto para receber somente a migration final. Não avance para produção.
@@ -175,7 +190,13 @@ WHERE p.status = 'executado'
 
 Resultado esperado: nenhuma linha. Se houver registros antigos, reconcilie com o Asaas antes de corrigir o ledger.
 
-## 6. Critério de aprovação
+## 6. Pendências funcionais que ainda bloqueiam a homologação
+
+- O fluxo `selecionarPlanoEmpresa` cria uma fatura imediatamente com `ciclo_inicio = agora` e `ciclo_fim = agora + 30 dias`, enquanto `abrir_ciclo_cobranca` usa o ciclo ancorado em `assinaturas.inicio_ciclo`. É necessário unificar essas referências antes de liberar faturamento recorrente; caso contrário, a fatura imediata pode não corresponder ao ciclo salvo em `ciclos_cobranca` e pode haver cobrança duplicada no fechamento do ciclo.
+- O fluxo de webhook ainda não implementa uma política contábil para reembolso total, reembolso parcial e chargeback do Asaas. Esses eventos precisam de tratamento explícito antes de operar com dinheiro real.
+- A aplicação de migrations não deve começar enquanto a reconciliação do histórico ausente e a sequência completa de dependências não estiverem fechadas.
+
+## 7. Critério de aprovação
 
 A homologação só pode ser considerada aprovada quando:
 
