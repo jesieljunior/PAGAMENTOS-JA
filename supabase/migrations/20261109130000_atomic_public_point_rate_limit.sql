@@ -1,6 +1,6 @@
 -- Rate limit atômico para o fluxo público de registro de ponto.
--- O advisory lock serializa tentativas do mesmo par token/IP, evitando que
--- requisições concorrentes ultrapassem o limite por uma corrida de contagem.
+-- O advisory lock serializa tentativas do mesmo QR antes de contar e inserir,
+-- evitando que requisições concorrentes ultrapassem os limites por uma corrida.
 CREATE OR REPLACE FUNCTION public.iniciar_tentativa_ponto_publico(
   _token_hash text,
   _cpf_hash text,
@@ -24,243 +24,24 @@ BEGIN
   IF _token_hash IS NULL
      OR _ip_hash IS NULL
      OR _acao IS NULL
-     OR _token_hash !~ '^[0-9a-f]{64}
-    RAISE EXCEPTION 'Parâmetros de rate limit inválidos';
-  END IF;
-
-  -- O lock global do QR serializa os três limites, inclusive quando IPs diferem.
-  PERFORM pg_advisory_xact_lock(hashtextextended('ponto-publico:' || _token_hash, 0));
-
-  -- Limite global por QR para conter ataques distribuídos sem afetar eventos usuais.
-  SELECT count(*)::integer
-  INTO v_total_token
-  FROM public.tentativas_ponto_publico t
-  WHERE t.token_hash = _token_hash
-    AND t.criado_em >= now() - interval '10 minutes';
-
-  -- Limite amplo por IP para não bloquear equipes grandes atrás do mesmo NAT.
-  SELECT count(*)::integer
-  INTO v_total_ip
-  FROM public.tentativas_ponto_publico t
-  WHERE t.token_hash = _token_hash
-    AND t.ip_hash = _ip_hash
-    AND t.criado_em >= now() - interval '10 minutes';
-
-  -- Limite individual por CPF para conter enumeração/brute force.
-  IF _cpf_hash IS NOT NULL THEN
-    SELECT count(*)::integer
-    INTO v_total_cpf
-    FROM public.tentativas_ponto_publico t
-    WHERE t.token_hash = _token_hash
-      AND t.cpf_hash = _cpf_hash
-      AND t.criado_em >= now() - interval '10 minutes';
-  ELSE
-    v_total_cpf := 0;
-  END IF;
-
-  IF v_total_token >= 10000 OR v_total_ip >= 1200 OR v_total_cpf >= 10 THEN
-    RETURN QUERY SELECT false, NULL::uuid;
-    RETURN;
-  END IF;
-
-  INSERT INTO public.tentativas_ponto_publico (
-    token_hash,
-    cpf_hash,
-    ip_hash,
-    acao,
-    sucesso
-  )
-  VALUES (
-    _token_hash,
-    _cpf_hash,
-    _ip_hash,
-    _acao,
-    false
-  )
-  RETURNING id INTO v_tentativa_id;
-
-  RETURN QUERY SELECT true, v_tentativa_id;
-END;
-$$;
-
-CREATE INDEX IF NOT EXISTS tentativas_ponto_token_created_idx
-  ON public.tentativas_ponto_publico (token_hash, criado_em DESC);
-
-CREATE INDEX IF NOT EXISTS tentativas_ponto_token_cpf_idx
-  ON public.tentativas_ponto_publico (token_hash, cpf_hash, criado_em DESC)
-  WHERE cpf_hash IS NOT NULL;
-
-CREATE INDEX IF NOT EXISTS tentativas_ponto_criado_em_idx
-  ON public.tentativas_ponto_publico (criado_em);
-
-REVOKE ALL ON FUNCTION public.iniciar_tentativa_ponto_publico(text, text, text, text)
-  FROM PUBLIC, anon, authenticated;
-GRANT EXECUTE ON FUNCTION public.iniciar_tentativa_ponto_publico(text, text, text, text)
-  TO service_role;
-
-     OR (_cpf_hash IS NOT NULL AND _cpf_hash !~ '^[0-9a-f]{64}
-    RAISE EXCEPTION 'Parâmetros de rate limit inválidos';
-  END IF;
-
-  -- O lock global do QR serializa os três limites, inclusive quando IPs diferem.
-  PERFORM pg_advisory_xact_lock(hashtextextended('ponto-publico:' || _token_hash, 0));
-
-  -- Limite global por QR para conter ataques distribuídos sem afetar eventos usuais.
-  SELECT count(*)::integer
-  INTO v_total_token
-  FROM public.tentativas_ponto_publico t
-  WHERE t.token_hash = _token_hash
-    AND t.criado_em >= now() - interval '10 minutes';
-
-  -- Limite amplo por IP para não bloquear equipes grandes atrás do mesmo NAT.
-  SELECT count(*)::integer
-  INTO v_total_ip
-  FROM public.tentativas_ponto_publico t
-  WHERE t.token_hash = _token_hash
-    AND t.ip_hash = _ip_hash
-    AND t.criado_em >= now() - interval '10 minutes';
-
-  -- Limite individual por CPF para conter enumeração/brute force.
-  IF _cpf_hash IS NOT NULL THEN
-    SELECT count(*)::integer
-    INTO v_total_cpf
-    FROM public.tentativas_ponto_publico t
-    WHERE t.token_hash = _token_hash
-      AND t.cpf_hash = _cpf_hash
-      AND t.criado_em >= now() - interval '10 minutes';
-  ELSE
-    v_total_cpf := 0;
-  END IF;
-
-  IF v_total_token >= 10000 OR v_total_ip >= 1200 OR v_total_cpf >= 10 THEN
-    RETURN QUERY SELECT false, NULL::uuid;
-    RETURN;
-  END IF;
-
-  INSERT INTO public.tentativas_ponto_publico (
-    token_hash,
-    cpf_hash,
-    ip_hash,
-    acao,
-    sucesso
-  )
-  VALUES (
-    _token_hash,
-    _cpf_hash,
-    _ip_hash,
-    _acao,
-    false
-  )
-  RETURNING id INTO v_tentativa_id;
-
-  RETURN QUERY SELECT true, v_tentativa_id;
-END;
-$$;
-
-CREATE INDEX IF NOT EXISTS tentativas_ponto_token_created_idx
-  ON public.tentativas_ponto_publico (token_hash, criado_em DESC);
-
-CREATE INDEX IF NOT EXISTS tentativas_ponto_token_cpf_idx
-  ON public.tentativas_ponto_publico (token_hash, cpf_hash, criado_em DESC)
-  WHERE cpf_hash IS NOT NULL;
-
-CREATE INDEX IF NOT EXISTS tentativas_ponto_criado_em_idx
-  ON public.tentativas_ponto_publico (criado_em);
-
-REVOKE ALL ON FUNCTION public.iniciar_tentativa_ponto_publico(text, text, text, text)
-  FROM PUBLIC, anon, authenticated;
-GRANT EXECUTE ON FUNCTION public.iniciar_tentativa_ponto_publico(text, text, text, text)
-  TO service_role;
-)
-     OR _ip_hash !~ '^[0-9a-f]{64}
-    RAISE EXCEPTION 'Parâmetros de rate limit inválidos';
-  END IF;
-
-  -- O lock global do QR serializa os três limites, inclusive quando IPs diferem.
-  PERFORM pg_advisory_xact_lock(hashtextextended('ponto-publico:' || _token_hash, 0));
-
-  -- Limite global por QR para conter ataques distribuídos sem afetar eventos usuais.
-  SELECT count(*)::integer
-  INTO v_total_token
-  FROM public.tentativas_ponto_publico t
-  WHERE t.token_hash = _token_hash
-    AND t.criado_em >= now() - interval '10 minutes';
-
-  -- Limite amplo por IP para não bloquear equipes grandes atrás do mesmo NAT.
-  SELECT count(*)::integer
-  INTO v_total_ip
-  FROM public.tentativas_ponto_publico t
-  WHERE t.token_hash = _token_hash
-    AND t.ip_hash = _ip_hash
-    AND t.criado_em >= now() - interval '10 minutes';
-
-  -- Limite individual por CPF para conter enumeração/brute force.
-  IF _cpf_hash IS NOT NULL THEN
-    SELECT count(*)::integer
-    INTO v_total_cpf
-    FROM public.tentativas_ponto_publico t
-    WHERE t.token_hash = _token_hash
-      AND t.cpf_hash = _cpf_hash
-      AND t.criado_em >= now() - interval '10 minutes';
-  ELSE
-    v_total_cpf := 0;
-  END IF;
-
-  IF v_total_token >= 10000 OR v_total_ip >= 1200 OR v_total_cpf >= 10 THEN
-    RETURN QUERY SELECT false, NULL::uuid;
-    RETURN;
-  END IF;
-
-  INSERT INTO public.tentativas_ponto_publico (
-    token_hash,
-    cpf_hash,
-    ip_hash,
-    acao,
-    sucesso
-  )
-  VALUES (
-    _token_hash,
-    _cpf_hash,
-    _ip_hash,
-    _acao,
-    false
-  )
-  RETURNING id INTO v_tentativa_id;
-
-  RETURN QUERY SELECT true, v_tentativa_id;
-END;
-$$;
-
-CREATE INDEX IF NOT EXISTS tentativas_ponto_token_created_idx
-  ON public.tentativas_ponto_publico (token_hash, criado_em DESC);
-
-CREATE INDEX IF NOT EXISTS tentativas_ponto_token_cpf_idx
-  ON public.tentativas_ponto_publico (token_hash, cpf_hash, criado_em DESC)
-  WHERE cpf_hash IS NOT NULL;
-
-CREATE INDEX IF NOT EXISTS tentativas_ponto_criado_em_idx
-  ON public.tentativas_ponto_publico (criado_em);
-
-REVOKE ALL ON FUNCTION public.iniciar_tentativa_ponto_publico(text, text, text, text)
-  FROM PUBLIC, anon, authenticated;
-GRANT EXECUTE ON FUNCTION public.iniciar_tentativa_ponto_publico(text, text, text, text)
-  TO service_role;
-
+     OR _token_hash !~ '^[0-9a-f]{64}$'
+     OR (_cpf_hash IS NOT NULL AND _cpf_hash !~ '^[0-9a-f]{64}$')
+     OR _ip_hash !~ '^[0-9a-f]{64}$'
      OR _acao NOT IN ('contexto', 'identificar', 'confirmar', 'registrar') THEN
     RAISE EXCEPTION 'Parâmetros de rate limit inválidos';
   END IF;
 
-  -- O lock global do QR serializa os três limites, inclusive quando IPs diferem.
-  PERFORM pg_advisory_xact_lock(hashtextextended('ponto-publico:' || _token_hash, 0));
+  -- Um lock por QR serializa os três limites, inclusive quando os IPs diferem.
+  PERFORM pg_advisory_xact_lock(
+    hashtextextended('ponto-publico:' || _token_hash, 0)
+  );
 
-  -- Limite global por QR para conter ataques distribuídos sem afetar eventos usuais.
   SELECT count(*)::integer
   INTO v_total_token
   FROM public.tentativas_ponto_publico t
   WHERE t.token_hash = _token_hash
     AND t.criado_em >= now() - interval '10 minutes';
 
-  -- Limite amplo por IP para não bloquear equipes grandes atrás do mesmo NAT.
   SELECT count(*)::integer
   INTO v_total_ip
   FROM public.tentativas_ponto_publico t
@@ -268,7 +49,6 @@ GRANT EXECUTE ON FUNCTION public.iniciar_tentativa_ponto_publico(text, text, tex
     AND t.ip_hash = _ip_hash
     AND t.criado_em >= now() - interval '10 minutes';
 
-  -- Limite individual por CPF para conter enumeração/brute force.
   IF _cpf_hash IS NOT NULL THEN
     SELECT count(*)::integer
     INTO v_total_cpf
