@@ -65,10 +65,23 @@ export const concluirCadastroComEmpresaEPlano = createServerFn({ method: "POST" 
     }
 
     // 3. Identifica plano escolhido
-    const planoEscolhido =
+    const planoCatalogo =
       PLANOS_CATALOGO.find((p) => p.id === data.planoId || p.codigo === data.planoCodigo) ||
       PLANOS_CATALOGO[0]!;
+    const { data: planoPersistido, error: erroPlano } = await db
+      .from("planos")
+      .select("id, codigo, nome, mensalidade, dias_trial")
+      .eq("codigo", planoCatalogo.codigo)
+      .eq("ativo", true)
+      .maybeSingle();
 
+    if (erroPlano || !planoPersistido) {
+      throw new Error(
+        "O catálogo de planos ainda não está sincronizado no banco. Conclua as migrations de Billing V2 antes do onboarding.",
+      );
+    }
+
+    const planoEscolhido = { ...planoCatalogo, ...planoPersistido };
     const ehGratuito = planoEscolhido.codigo === "free" || planoEscolhido.mensalidade === 0;
 
     // 4. Cria ou atualiza assinatura. O trial não pode ser reiniciado ao
