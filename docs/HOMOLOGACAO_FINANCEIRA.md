@@ -20,6 +20,23 @@ HAVING COUNT(*) > 1;
 
 Resultado esperado: nenhuma linha. Se houver resultados, não remova lançamentos automaticamente. Reconcilie cada cobrança com o registro do Asaas e o extrato financeiro antes de continuar.
 
+Verifique também duplicidades no ledger de pagamentos antes da criação dos índices únicos parciais:
+
+```sql
+SELECT
+  pagamento_id,
+  tipo,
+  COUNT(*) AS quantidade_lancamentos,
+  SUM(valor) AS valor_total
+FROM public.movimentos_saldo
+WHERE pagamento_id IS NOT NULL
+  AND tipo IN ('debito', 'credito')
+GROUP BY pagamento_id, tipo
+HAVING COUNT(*) > 1;
+```
+
+Resultado esperado: nenhuma linha. Se houver duplicidades, não apague lançamentos para fazer a migration passar. Reconcilie cada pagamento com o fechamento e a transferência correspondente no Asaas.
+
 ## 2. Pré-requisitos e ordem das migrations
 
 Não aplique apenas as duas migrations finais isoladamente. A liquidação de faturas depende da tabela `faturas_plataforma`, criada na migration de Billing V2, e as RPCs de Pix dependem dos estados adicionais do enum `status_pagamento`.
