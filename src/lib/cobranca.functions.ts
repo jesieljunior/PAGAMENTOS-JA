@@ -382,36 +382,23 @@ export const selecionarPlanoEmpresa = createServerFn({ method: "POST" })
       }
     }
 
-    // Se o banco ainda não tiver a tabela populada, resolve pelo catálogo oficial
+    // Se o ID recebido for do catálogo estático antigo, resolve pelo código
+    // persistido. Nunca cria assinatura apontando para um plano inexistente.
     if (!plano) {
       const planoCat = PLANOS_CATALOGO.find(
         (p) => p.id === data.planoId || p.codigo === data.planoId,
       );
       if (planoCat) {
-        plano = {
-          id: planoCat.id,
-          codigo: planoCat.codigo,
-          nome: planoCat.nome,
-          descricao: planoCat.descricao,
-          mensalidade: planoCat.mensalidade,
-          dias_trial: planoCat.dias_trial,
-          participacoes_incluidas: planoCat.participacoes_incluidas,
-          valor_excedente: planoCat.valor_excedente,
-          limite_eventos_ciclo: planoCat.limite_eventos_ciclo,
-          limite_pessoas_evento: planoCat.limite_pessoas_evento,
-          limite_clt: planoCat.limite_clt,
-          limite_supervisores: planoCat.limite_supervisores,
-          retencao_evidencias_dias: 30,
-          aviso_vendas_acima: null,
-          recursos: planoCat.recursos,
-          ativo: true,
-          ordem: 1,
-          percentual: 0,
-          taxa_fixa_pix: 0,
-          modelo: "assinatura_percentual" as const,
-          criado_em: new Date().toISOString(),
-          atualizado_em: new Date().toISOString(),
-        } as PlanoRow;
+        const consultaPorCodigo = await (admin ?? client)
+          .from("planos")
+          .select("*")
+          .eq("codigo", planoCat.codigo)
+          .eq("ativo", true)
+          .maybeSingle();
+        if (consultaPorCodigo.error) {
+          throw new Error("Não foi possível consultar o plano no catálogo persistido.");
+        }
+        plano = consultaPorCodigo.data;
       }
     }
 
