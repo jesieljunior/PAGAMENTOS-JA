@@ -224,7 +224,7 @@ export async function buscarCobrancaPorReferencia(referenciaExterna: string) {
       externalReference?: string;
       invoiceUrl?: string;
     }>;
-  }>(`/payments?externalReference=${encodeURIComponent(referenciaExterna)}&limit=1`);
+  }>(`/payments?externalReference=${encodeURIComponent(referenciaExterna)}&limit=10`);
 }
 
 /** Tipo da chave Pix inferido pelo formato, como o Asaas espera. */
