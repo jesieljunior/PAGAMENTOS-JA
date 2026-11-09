@@ -109,24 +109,6 @@ async function hash(value: string): Promise<string> {
   return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
-async function registrarTentativa(
-  supabase: AdminClient,
-  token: string,
-  cpf: string,
-  ip: string,
-  action: string,
-  sucesso: boolean,
-): Promise<void> {
-  const { error } = await supabase.from("tentativas_ponto_publico").insert({
-    token_hash: await hash(token),
-    cpf_hash: await hash(cpf),
-    ip_hash: await hash(ip),
-    acao: action,
-    sucesso,
-  });
-  failIfError(error, "Não foi possível registrar auditoria da tentativa");
-}
-
 async function comLimiteDeTentativas<T>(
   supabase: AdminClient,
   request: Request,
@@ -139,29 +121,45 @@ async function comLimiteDeTentativas<T>(
     request.headers.get("cf-connecting-ip") ??
     request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ??
     "indisponivel";
-  const desde = new Date(Date.now() - 10 * 60_000).toISOString();
   const tokenHash = await hash(token);
   const ipHash = await hash(ip);
-  const { count, error } = await supabase
-    .from("tentativas_ponto_publico")
-    .select("id", { count: "exact", head: true })
-    .eq("token_hash", tokenHash)
-    .eq("ip_hash", ipHash)
-    .gte("criado_em", desde);
+  const cpfHash = await hash(cpf);
+
+  const iniciarTentativa = supabase.rpc as unknown as (
+    nome: string,
+    argumentos: Record<string, unknown>,
+  ) => PromiseLike<{
+    data: { permitido: boolean; tentativa_id: string | null }[] | null;
+    error: { message: string } | null;
+  }>;
+  const { data, error } = await iniciarTentativa("iniciar_tentativa_ponto_publico", {
+    _token_hash: tokenHash,
+    _cpf_hash: cpfHash,
+    _ip_hash: ipHash,
+    _acao: action,
+  });
   failIfError(error, "Não foi possível verificar o limite de tentativas");
-  if ((count ?? 0) >= 20) {
+
+  const tentativa = data?.[0];
+  if (!tentativa?.permitido || !tentativa.tentativa_id) {
     throw new RequestError("Muitas tentativas. Aguarde 10 minutos e tente novamente.", 429);
   }
 
   try {
     const result = await operation();
-    await registrarTentativa(supabase, token, cpf, ip, action, true);
+    const { error: erroAtualizacao } = await supabase
+      .from("tentativas_ponto_publico")
+      .update({ sucesso: true })
+      .eq("id", tentativa.tentativa_id);
+    failIfError(erroAtualizacao, "Não foi possível finalizar auditoria da tentativa");
     return result;
   } catch (error) {
-    try {
-      await registrarTentativa(supabase, token, cpf, ip, action, false);
-    } catch (auditError) {
-      console.error("[ponto-publico] Falha ao registrar tentativa malsucedida:", auditError);
+    const { error: erroAtualizacao } = await supabase
+      .from("tentativas_ponto_publico")
+      .update({ sucesso: false })
+      .eq("id", tentativa.tentativa_id);
+    if (erroAtualizacao) {
+      console.error("[ponto-publico] Falha ao registrar tentativa malsucedida:", erroAtualizacao);
     }
     throw error;
   }
