@@ -356,6 +356,443 @@ export const obterContextoPonto = createServerFn({ method: "GET" })
 
     // 4. Tenta Edge Function se disponível no Supabase
     try {
+      return await invokePontoEdge({ action: "contexto", token: data.token }, contextoSchema);
+    } catch {
+      // 5. Fallback nativo server-side
+      const supabase = createSupabasePublicClient();
+      const { data: evento, error: erroEvento } = await supabase
+        .from("eventos")
+        .select(
+          "id, nome, local, status, empresa_id, data_inicio, data_fim, qr_code_expira_em, qr_code_gerado_em, criado_em",
+        )
+        .eq("qr_code_token", data.token)
+        .maybeSingle();
+
+      if (erroEvento || !evento) {
+        throw new Error(
+          "QR Code não encontrado ou expirado. Peça ao supervisor para abrir o evento no painel e renovar o QR Code.",
+        );
+      }
+
+      const expiraEm = validarValidadeQr(evento);
+
+      const { data: config } = await supabase
+        .from("configuracoes")
+        .select("checkin_exige_selfie, checkin_exige_gps")
+        .eq("empresa_id", evento.empresa_id)
+        .maybeSingle();
+
+      let pontoBasico = false;
+      try {
+        const { data: plano } = await supabase.rpc("plano_da_empresa", {
+          _empresa_id: evento.empresa_id,
+        });
+        pontoBasico = plano?.codigo === "free";
+      } catch {
+        pontoBasico = false;
+      }
+
+      return {
+        pontoBasico,
+        evento: {
+          id: evento.id,
+          nome: evento.nome,
+          local: evento.local,
+          status: evento.status,
+          data_inicio: evento.data_inicio,
+          data_fim: evento.data_fim,
+          qr_code_expira_em: expiraEm,
+        },
+        exigeSelfie: Boolean(config?.checkin_exige_selfie),
+        exigeGps: Boolean(config?.checkin_exige_gps),
+      };
+    }
+  });
+
+/** Identifica o freelancer pelo CPF e devolve as marcações já registradas. */
+export const identificarNoPonto = createServerFn({ method: "POST" })
+  .validator((input: unknown) => identificarSchema.parse(input))
+  .handler(async ({ data }) => {
+    // 1. Tenta RPC SECURITY DEFINER no Supabase
+    try {
+      const supabase = createSupabasePublicClient();
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const { data: rpcData, error: rpcError } = await (supabase.rpc as any)(
+        "identificar_no_ponto_publico",
+        { _token: data.token, _cpf: data.cpf },
+      );
+      if (!rpcError && rpcData && typeof rpcData === "object") {
+        return identificacaoResultSchema.parse(rpcData);
+      }
+      if (rpcError && rpcError.message) {
+        const msg = rpcError.message;
+        if (!msg.includes("function") && !msg.includes("does not exist")) {
+          throw new Error(msg);
+        }
+      }
+    } catch (e) {
+      if (
+        e instanceof Error &&
+        !e.message.includes("function") &&
+        !e.message.includes("does not exist")
+      ) {
+        throw e;
+      }
+    }
+
+    // 2. Tenta Edge Function se disponível
+    try {
+      return await invokePontoEdge({ action: "identificar", ...data }, identificacaoResultSchema);
+    } catch {
+      const cpfLimpo = data.cpf.replace(/\D/g, "");
+
+      // 3. Tenta resolver via sessão ativa do evento no servidor
+      const sessao = buscarSessaoEventoPorToken(data.token);
+      if (sessao) {
+        validarValidadeQr({
+          data_fim: sessao.data_fim,
+          qr_code_expira_em: sessao.qr_code_expira_em,
+        });
+
+        // Se houver authHeader do supervisor, consulta Supabase diretamente com permissão
+        if (sessao.authHeader) {
+          try {
+            const authClient = criarSupabaseClientComAuth(sessao.authHeader);
+            const { data: freelancer } = await authClient
+              .from("freelancers")
+              .select("id, nome")
+              .eq("empresa_id", sessao.empresaId)
+              .eq("cpf", cpfLimpo)
+              .maybeSingle();
+
+            if (freelancer) {
+              const { data: equipes } = await authClient
+                .from("equipes")
+                .select("id")
+                .eq("evento_id", sessao.eventoId);
+              const eqIds = (equipes ?? []).map((e) => e.id);
+
+              if (eqIds.length > 0) {
+                const { data: escala } = await authClient
+                  .from("escalas")
+                  .select("id, status")
+                  .eq("freelancer_id", freelancer.id)
+                  .in("equipe_id", eqIds)
+                  .neq("status", "substituido")
+                  .maybeSingle();
+
+                if (escala) {
+                  if (escala.status === "recusado") {
+                    throw new Error("Sua participação neste evento foi recusada.");
+                  }
+
+                  const { data: pontos } = await authClient
+                    .from("pontos")
+                    .select("id, tipo, registrado_em, status, fora_horario")
+                    .eq("escala_id", escala.id)
+                    .order("registrado_em");
+
+                  return {
+                    escalaId: escala.id,
+                    statusEscala: escala.status,
+                    nome: freelancer.nome,
+                    pontos: pontos ?? [],
+                  };
+                }
+              }
+            }
+          } catch (authErr) {
+            if (authErr instanceof Error && authErr.message.includes("recusada")) {
+              throw authErr;
+            }
+          }
+        }
+
+        // Validação da escala a partir da sessão
+        const escalaCache = sessao.escalas.find((e) => e.cpf.replace(/\D/g, "") === cpfLimpo);
+        if (!escalaCache) {
+          throw new Error("Colaborador com este CPF não encontrado na escala deste evento.");
+        }
+        if (escalaCache.status === "recusado") {
+          throw new Error("Sua participação neste evento foi recusada.");
+        }
+
+        // Consulta sempre o PostgreSQL para evitar marcas desatualizadas entre instâncias serverless
+        try {
+          const { hasAdminKey, supabaseAdmin } =
+            await import("@/integrations/supabase/client.server");
+          const dbClient = sessao.authHeader
+            ? criarSupabaseClientComAuth(sessao.authHeader)
+            : hasAdminKey()
+              ? supabaseAdmin
+              : null;
+
+          if (dbClient) {
+            const { data: pontosDb } = await dbClient
+              .from("pontos")
+              .select("id, tipo, registrado_em, status, fora_horario")
+              .eq("escala_id", escalaCache.escalaId)
+              .order("registrado_em");
+
+            if (pontosDb) {
+              return {
+                escalaId: escalaCache.escalaId,
+                statusEscala: escalaCache.status,
+                nome: escalaCache.nome,
+                pontos: pontosDb,
+              };
+            }
+          }
+        } catch {
+          // Continua para o cache local se a rede falhar
+        }
+
+        const pontosCache = sessao.pontos.filter((p) => p.escalaId === escalaCache.escalaId);
+        return {
+          escalaId: escalaCache.escalaId,
+          statusEscala: escalaCache.status,
+          nome: escalaCache.nome,
+          pontos: pontosCache.map((p) => ({
+            id: p.id,
+            tipo: p.tipo,
+            registrado_em: p.registrado_em,
+            status: p.status,
+            fora_horario: p.fora_horario,
+          })),
+        };
+      }
+
+      // 3. Fallback nativo
+      const supabase = createSupabasePublicClient();
+      const { data: evento, error: erroEvento } = await supabase
+        .from("eventos")
+        .select(
+          "id, empresa_id, data_inicio, data_fim, qr_code_expira_em, qr_code_gerado_em, criado_em",
+        )
+        .eq("qr_code_token", data.token)
+        .maybeSingle();
+
+      if (erroEvento || !evento) {
+        throw new Error("QR Code inválido ou não encontrado.");
+      }
+
+      validarValidadeQr(evento);
+
+      const { data: freelancer } = await supabase
+        .from("freelancers")
+        .select("id, nome")
+        .eq("empresa_id", evento.empresa_id)
+        .eq("cpf", cpfLimpo)
+        .maybeSingle();
+
+      if (!freelancer) {
+        throw new Error("Colaborador com este CPF não encontrado nesta agência.");
+      }
+
+      const { data: equipes } = await supabase
+        .from("equipes")
+        .select("id")
+        .eq("evento_id", evento.id);
+      const eqIds = (equipes ?? []).map((e) => e.id);
+
+      const { data: escala } = await supabase
+        .from("escalas")
+        .select("id, status")
+        .eq("freelancer_id", freelancer.id)
+        .in("equipe_id", eqIds)
+        .neq("status", "substituido")
+        .maybeSingle();
+
+      if (!escala) {
+        throw new Error("Você não está escalado neste evento.");
+      }
+      if (escala.status === "recusado") {
+        throw new Error("Sua participação neste evento foi recusada.");
+      }
+
+      const { data: pontos } = await supabase
+        .from("pontos")
+        .select("id, tipo, registrado_em, status, fora_horario")
+        .eq("escala_id", escala.id)
+        .order("registrado_em");
+
+      return {
+        escalaId: escala.id,
+        statusEscala: escala.status,
+        nome: freelancer.nome,
+        pontos: pontos ?? [],
+      };
+    }
+  });
+
+/** Confirma a presença na escala a partir do celular do freelancer. */
+export const confirmarPresenca = createServerFn({ method: "POST" })
+  .validator((input: unknown) => identificarSchema.parse(input))
+  .handler(async ({ data }) => {
+    // 1. Tenta RPC SECURITY DEFINER no Supabase
+    try {
+      const supabase = createSupabasePublicClient();
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const { data: rpcData, error: rpcError } = await (supabase.rpc as any)(
+        "confirmar_presenca_ponto_publico",
+        { _token: data.token, _cpf: data.cpf },
+      );
+      if (!rpcError && rpcData) {
+        return { ok: true as const };
+      }
+    } catch {
+      // continua para os próximos fallbacks
+    }
+
+    try {
+      return await invokePontoEdge(
+        { action: "confirmar", ...data },
+        z.object({ ok: z.literal(true) }),
+      );
+    } catch {
+      const sessao = buscarSessaoEventoPorToken(data.token);
+      const cpfLimpo = data.cpf.replace(/\D/g, "");
+      const agoraIso = new Date().toISOString();
+
+      if (sessao) {
+        const escala = sessao.escalas.find((e) => e.cpf.replace(/\D/g, "") === cpfLimpo);
+        if (escala) {
+          atualizarStatusEscalaSessao(data.token, escala.escalaId, "confirmado");
+        }
+      }
+
+      const { hasAdminKey, supabaseAdmin } = await import("@/integrations/supabase/client.server");
+      const dbClient = sessao?.authHeader
+        ? criarSupabaseClientComAuth(sessao.authHeader)
+        : hasAdminKey()
+          ? supabaseAdmin
+          : null;
+
+      if (!dbClient) {
+        throw new Error("Conexão com o banco de dados indisponível para confirmar presença.");
+      }
+
+      const { data: evento, error: erroEv } = await dbClient
+        .from("eventos")
+        .select("id, empresa_id")
+        .eq("qr_code_token", data.token)
+        .maybeSingle();
+
+      if (erroEv || !evento) {
+        throw new Error("QR Code não encontrado para confirmação de presença.");
+      }
+
+      const { data: freela, error: erroFreela } = await dbClient
+        .from("freelancers")
+        .select("id")
+        .eq("empresa_id", evento.empresa_id)
+        .eq("cpf", cpfLimpo)
+        .maybeSingle();
+
+      if (erroFreela || !freela) {
+        throw new Error("Colaborador não encontrado nesta agência.");
+      }
+
+      const { data: equipes } = await dbClient
+        .from("equipes")
+        .select("id")
+        .eq("evento_id", evento.id);
+      const eqIds = (equipes ?? []).map((e) => e.id);
+      if (eqIds.length > 0) {
+        const { error: erroConfirmacao } = await dbClient
+          .from("escalas")
+          .update({ status: "confirmado", confirmado_em: agoraIso })
+          .eq("freelancer_id", freela.id)
+          .in("equipe_id", eqIds)
+          .eq("status", "convidado");
+
+        if (erroConfirmacao) {
+          console.error("[ponto] Erro ao confirmar presença no banco:", erroConfirmacao);
+          throw new Error("Falha ao persistir confirmação de presença no banco de dados.");
+        }
+      }
+
+      if (sessao) {
+        const escala = sessao.escalas.find((e) => e.cpf.replace(/\D/g, "") === cpfLimpo);
+        if (escala) {
+          atualizarStatusEscalaSessao(data.token, escala.escalaId, "confirmado");
+        }
+      }
+
+      return { ok: true as const };
+    }
+  });
+
+/** Registra entrada, intervalo ou saída. A marcação fica pendente de revisão. */
+export const registrarPonto = createServerFn({ method: "POST" })
+  .validator((input: unknown) => registrarSchema.parse(input))
+  .handler(async ({ data }) => {
+    // 1. Tenta RPC SECURITY DEFINER no Supabase
+    try {
+      const supabase = createSupabasePublicClient();
+      let fotoUrl: string | null = null;
+      if (data.fotoBase64) {
+        try {
+          const partesFoto = /^data:image\/(jpeg|png|webp);base64,([A-Za-z0-9+/=]+)$/.exec(
+            data.fotoBase64,
+          );
+          if (partesFoto) {
+            const formato = partesFoto[1];
+            const bytes = Uint8Array.from(Buffer.from(partesFoto[2]!, "base64"));
+            const caminho = `publico/${data.escalaId}/${crypto.randomUUID()}.${formato === "jpeg" ? "jpg" : formato}`;
+            const { error: erroUpload } = await supabase.storage
+              .from("selfies-ponto")
+              .upload(caminho, bytes, { contentType: `image/${formato}`, upsert: false });
+            if (!erroUpload) {
+              fotoUrl = caminho;
+            } else {
+              fotoUrl = data.fotoBase64;
+            }
+          } else {
+            fotoUrl = data.fotoBase64;
+          }
+        } catch {
+          fotoUrl = data.fotoBase64;
+        }
+      }
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const { data: rpcData, error: rpcError } = await (supabase.rpc as any)(
+        "registrar_ponto_publico",
+        {
+          _token: data.token,
+          _cpf: data.cpf,
+          _escala_id: data.escalaId,
+          _tipo: data.tipo,
+          _foto_url: fotoUrl,
+          _gps_lat: data.lat ?? null,
+          _gps_lng: data.lng ?? null,
+          _consentiu_selfie: Boolean(data.consentiuSelfie),
+        },
+      );
+      if (!rpcError && rpcData && typeof rpcData === "object" && "ok" in rpcData) {
+        return {
+          ok: true as const,
+          foraHorario: Boolean((rpcData as { foraHorario?: boolean }).foraHorario),
+        };
+      }
+      if (rpcError && rpcError.message) {
+        const msg = rpcError.message;
+        if (!msg.includes("function") && !msg.includes("does not exist")) {
+          throw new Error(msg);
+        }
+      }
+    } catch (e) {
+      if (
+        e instanceof Error &&
+        !e.message.includes("function") &&
+        !e.message.includes("does not exist")
+      ) {
+        throw e;
+      }
+    }
+
+    try {
       return await invokePontoEdge(
         { action: "registrar", ...data },
         z.object({ ok: z.literal(true), foraHorario: z.boolean() }),
