@@ -98,9 +98,27 @@ function validarValidadeQr(evento: {
   return new Date(dataBase).toISOString();
 }
 
+let chaveHashPromise: Promise<CryptoKey> | null = null;
+
 async function hash(value: string): Promise<string> {
-  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value));
-  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
+  const segredo = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+  if (!segredo) {
+    throw new RequestError("Configuração de proteção de dados do ponto incompleta.", 500);
+  }
+
+  chaveHashPromise ??= crypto.subtle.importKey(
+    "raw",
+    new TextEncoder().encode(segredo),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"],
+  );
+  const assinatura = await crypto.subtle.sign(
+    "HMAC",
+    await chaveHashPromise,
+    new TextEncoder().encode(value),
+  );
+  return Array.from(new Uint8Array(assinatura), (byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
 async function comLimiteDeTentativas<T>(
