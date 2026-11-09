@@ -231,7 +231,7 @@ Resultado esperado: nenhuma linha. Se houver registros antigos, reconcilie com o
 - O webhook ainda consulta o Asaas e executa RPCs financeiras antes de responder. A documentação do Asaas orienta persistir o evento e responder HTTP 200 em até 10 segundos; o processamento síncrono pode ultrapassar esse limite e provocar retentativas ou interrupção da fila. Eventos duplicados em processamento agora recebem resposta não-2xx até que a instância responsável conclua; o endpoint só responde HTTP 200 após persistir o estado `processado`.
 - Validar trial ativo, trial expirado e trial sem `trial_ate`; confirmar que o banco bloqueia recursos e não abre ciclo novo após expiração.
 - A tabela `tentativas_ponto_publico` existe, mas as RPCs públicas não aplicam rate limit efetivo por CPF/token/IP. Antes de produção, implementar e testar controle de tentativas sem perder o registro das falhas por rollback da RPC.
-- A policy `selfies_insert_publico` permite upload anônimo para qualquer caminho dentro do bucket `selfies-ponto`. Restringir tipo/tamanho e caminho do objeto ou substituir por upload assinado vinculado a evento/empresa.
+- A policy `selfies_insert_publico` agora limita o upload a caminhos de escala válidos, imagens JPEG/PNG/WebP de até 5 MB, empresa ativa, assinatura válida e QR não expirado. Ainda falta vincular o upload ao token QR de forma verificável e aplicar rate limit para evitar uploads repetidos usando um `escala_id` conhecido.
 - A aplicação de migrations não deve começar enquanto a reconciliação do histórico ausente e a sequência completa de dependências não estiverem fechadas.
 
 ## 7. Critério de aprovação
