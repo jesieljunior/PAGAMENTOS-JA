@@ -212,9 +212,7 @@ function PaginaPlano() {
 
   const { uso, ciclo, estimativa, planos, faturas, taxas, assinaturaStatus } = data;
   const planoAtualId = ciclo?.plano_id;
-  const assinaturaPendente = ["pendente", "aguardando_pagamento"].includes(
-    assinaturaStatus ?? "",
-  );
+  const assinaturaPendente = ["pendente", "aguardando_pagamento"].includes(assinaturaStatus ?? "");
 
   return (
     <AppShell
