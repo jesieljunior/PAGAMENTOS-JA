@@ -538,23 +538,16 @@ WHERE id = 'selfies-ponto';
 
 DROP POLICY IF EXISTS "selfies_insert_publico" ON storage.objects;
 CREATE POLICY "selfies_insert_publico" ON storage.objects
-  FOR INSERT TO anon, authenticated
+  FOR INSERT TO authenticated
   WITH CHECK (
     bucket_id = 'selfies-ponto'
-    AND name ~* '^(publico|[0-9a-f-]{36})/[0-9a-f-]{36}/[0-9a-f-]{8}-[0-9a-f-]{4}-[0-9a-f-]{4}-[0-9a-f-]{4}-[0-9a-f-]{12}\.(jpg|png|webp)$'
-    AND (
-      (
-        (storage.foldername(name))[1] = 'publico'
-        AND public.pode_enviar_selfie_ponto((storage.foldername(name))[2], NULL)
-      )
-      OR (
-        auth.role() = 'authenticated'
-        AND (storage.foldername(name))[1] = public.empresa_atual()::text
-        AND public.pode_enviar_selfie_ponto(
-          (storage.foldername(name))[2],
-          public.empresa_atual()::text
-        )
-      )
+    AND name ~* '^[0-9a-f-]{36}/[0-9a-f-]{36}/[0-9a-f-]{8}-[0-9a-f-]{4}-[0-9a-f-]{4}-[0-9a-f-]{4}-[0-9a-f-]{12}\.(jpg|png|webp)
+
+
+    AND (storage.foldername(name))[1] = public.empresa_atual()::text
+    AND public.pode_enviar_selfie_ponto(
+      (storage.foldername(name))[2],
+      public.empresa_atual()::text
     )
   );
 
