@@ -1,10 +1,10 @@
 /**
  * Política de confirmação de pagamentos recebidos pelo Asaas.
  *
- * PAYMENT_RECEIVED_IN_CASH é uma baixa manual de recebimento externo.
- * O Asaas informa que esse evento não disponibiliza saldo na conta Asaas;
- * por isso, ele não liquida automaticamente faturas SaaS nem libera funding.
- * Esses casos exigem conciliação manual fora do fluxo automático.
+ * PAYMENT_RECEIVED também pode ocorrer após uma baixa manual externa.
+ * Nesse caso, billingType = RECEIVED_IN_CASH não disponibiliza saldo na conta Asaas;
+ * por isso, não liquida automaticamente faturas SaaS nem libera funding.
+ * O reconhecimento desse recebimento exige conciliação manual fora do fluxo automático.
  */
 export const EVENTOS_FATURA_SAAS = new Set<string>(["PAYMENT_RECEIVED", "PAYMENT_CONFIRMED"]);
 
