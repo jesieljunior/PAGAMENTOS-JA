@@ -410,7 +410,7 @@ export const selecionarPlanoEmpresa = createServerFn({ method: "POST" })
 
     // Antes de criar outra cobrança, reconcilia qualquer fatura ainda pendente.
     // Uma resposta perdida do Asaas nunca deve gerar uma segunda cobrança automática.
-    if (plano.mensalidade > 0) {
+    {
       const consultaFaturaPendente = await (admin ?? client)
         .from("faturas_plataforma")
         .select("id, plano_id, total, status, referencia_provedor, vencimento")
@@ -429,6 +429,11 @@ export const selecionarPlanoEmpresa = createServerFn({ method: "POST" })
         if (faturaPendente.plano_id !== plano.id) {
           throw new Error(
             "Existe uma fatura SaaS pendente de outro plano. Regularize ou cancele essa cobrança antes de trocar de plano.",
+          );
+        }
+        if (plano.mensalidade <= 0) {
+          throw new Error(
+            "Existe uma fatura SaaS pendente vinculada ao plano gratuito. A troca está bloqueada até a reconciliação dessa cobrança.",
           );
         }
 
