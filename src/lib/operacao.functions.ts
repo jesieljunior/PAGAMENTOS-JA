@@ -402,6 +402,11 @@ export const rotacionarQrEvento = createServerFn({ method: "POST" })
       data_fim: evento.data_fim,
       qr_code_expira_em: expiraEm,
       qr_code_token: token,
+    }, {
+      exigeSelfie: false,
+      exigeGps: false,
+      pontoBasico: false,
+      expiraEm,
     });
 
     salvarSessaoEvento({
