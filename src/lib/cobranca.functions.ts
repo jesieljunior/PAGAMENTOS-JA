@@ -149,6 +149,7 @@ export const carregarCobranca = createServerFn({ method: "GET" })
         faturas: [] as FaturaRow[],
         planos: (planosFinais ?? []) as PlanoRow[],
         taxas: [] as TaxaRow[],
+        assinaturaStatus: null as string | null,
       };
     };
 
@@ -174,7 +175,7 @@ export const carregarCobranca = createServerFn({ method: "GET" })
         }
       }
 
-      const [uso, ciclo, faturas, planos, taxas] = await Promise.all([
+      const [uso, ciclo, faturas, planos, taxas, assinatura] = await Promise.all([
         client.rpc("resumo_uso_empresa", { _empresa_id: empresaId }).then(async (r) => {
           if ((r?.error || !r?.data) && admin) {
             try {
@@ -254,6 +255,25 @@ export const carregarCobranca = createServerFn({ method: "GET" })
             }
             return r;
           }),
+        client
+          .from("assinaturas")
+          .select("status")
+          .eq("empresa_id", empresaId)
+          .maybeSingle()
+          .then(async (r) => {
+            if ((r?.error || !r?.data) && admin) {
+              try {
+                return await admin
+                  .from("assinaturas")
+                  .select("status")
+                  .eq("empresa_id", empresaId)
+                  .maybeSingle();
+              } catch {
+                return r;
+              }
+            }
+            return r;
+          }),
       ]);
 
       const resumo = uso?.data?.[0];
@@ -318,6 +338,7 @@ export const carregarCobranca = createServerFn({ method: "GET" })
         faturas: (faturas?.data ?? []) as FaturaRow[],
         planos: listaPlanos,
         taxas: (taxas?.data ?? []) as TaxaRow[],
+        assinaturaStatus: assinatura?.data?.status ?? null,
       };
     } catch (err) {
       console.warn("[carregarCobranca] Recuperando fallback com planos:", err);
