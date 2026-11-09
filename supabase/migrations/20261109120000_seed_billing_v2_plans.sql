@@ -57,11 +57,19 @@ WHERE p.codigo = 'free'
 -- Agenda a expiração de evidências antigas que ainda não tinham prazo.
 -- Usa a menor retenção entre a configuração da agência e o plano vigente.
 UPDATE public.pontos pt
-SET selfie_expira_em = pt.registrado_em
+SET evidencia_expira_em = pt.registrado_em
   + make_interval(days => LEAST(
       COALESCE(cfg.selfie_retencao_dias, 90),
       COALESCE(pl.retencao_evidencias_dias, 365)
-    ))
+    )),
+    selfie_expira_em = CASE
+      WHEN pt.foto_url IS NOT NULL THEN pt.registrado_em
+        + make_interval(days => LEAST(
+            COALESCE(cfg.selfie_retencao_dias, 90),
+            COALESCE(pl.retencao_evidencias_dias, 365)
+          ))
+      ELSE pt.selfie_expira_em
+    END
 FROM public.escalas s
 JOIN public.equipes eq ON eq.id = s.equipe_id
 JOIN public.eventos ev ON ev.id = eq.evento_id
@@ -69,6 +77,6 @@ LEFT JOIN public.configuracoes cfg ON cfg.empresa_id = ev.empresa_id
 LEFT JOIN public.assinaturas a ON a.empresa_id = ev.empresa_id
 LEFT JOIN public.planos pl ON pl.id = a.plano_id
 WHERE pt.escala_id = s.id
-  AND pt.selfie_expira_em IS NULL
+  AND pt.evidencia_expira_em IS NULL
   AND (pt.foto_url IS NOT NULL OR pt.gps_lat IS NOT NULL OR pt.gps_lng IS NOT NULL);
 
