@@ -228,6 +228,9 @@ export const Route = createFileRoute("/api/public/webhooks/asaas")({
             if (faturaPlataforma) {
               const { obterCobrancaAsaas } = await import("@/lib/asaas.server");
               const cobrancaVerificada = await obterCobrancaAsaas(parceiroId);
+              if (!cobrancaVerificada.billingType) {
+                throw new Error("Asaas não retornou billingType para a cobrança SaaS.");
+              }
               if (isRecebimentoManualEmDinheiro(cobrancaVerificada.billingType)) {
                 throw new Error(
                   "Recebimento manual em dinheiro não liquida fatura SaaS automaticamente.",
@@ -294,6 +297,9 @@ export const Route = createFileRoute("/api/public/webhooks/asaas")({
             if (cobrancaLocal) {
               const { obterCobrancaAsaas } = await import("@/lib/asaas.server");
               const remota = await obterCobrancaAsaas(parceiroId);
+              if (!remota.billingType) {
+                throw new Error("Asaas não retornou billingType para a cobrança operacional.");
+              }
               if (isRecebimentoManualEmDinheiro(remota.billingType)) {
                 throw new Error(
                   "Recebimento manual em dinheiro não pode liberar funding operacional.",
