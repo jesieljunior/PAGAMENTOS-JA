@@ -86,11 +86,13 @@ function Onboarding() {
         toast.success(
           `Agência criada com sucesso! Você tem ${DIAS_TRIAL_PADRAO} dias de acesso gratuito liberados.`,
         );
+        navigate({ to: "/painel", replace: true });
       } else {
-        toast.success(`Agência criada e plano ${res.planoNome} selecionado! Bem-vindo ao Já.`);
+        toast.success(
+          `Agência criada. Finalize a contratação do plano ${res.planoNome} na próxima tela.`,
+        );
+        navigate({ to: "/plano", replace: true });
       }
-
-      navigate({ to: "/painel", replace: true });
     } catch (err) {
       setSalvando(false);
       toast.error(err instanceof Error ? err.message : "Erro ao concluir cadastro da agência.");
