@@ -46,7 +46,9 @@ function tokenValue(value: unknown): string {
 }
 
 function validarEventoOperacional(status: string): void {
-  if (["fechamento", "pagamento", "concluido", "arquivado", "cancelado"].includes(status)) {
+  if (
+    new Set<string>(["fechamento", "pagamento", "concluido", "arquivado", "cancelado"]).has(status)
+  ) {
     throw new RequestError("Este evento não está disponível para registro de ponto.");
   }
 }
