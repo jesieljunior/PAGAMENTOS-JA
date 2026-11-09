@@ -229,6 +229,7 @@ export const sincronizarPontoEvento = createServerFn({ method: "POST" })
       exigeSelfie: Boolean(config?.checkin_exige_selfie),
       exigeGps: Boolean(config?.checkin_exige_gps),
       pontoBasico,
+      expiraEm,
     });
 
     salvarSessaoEvento({
