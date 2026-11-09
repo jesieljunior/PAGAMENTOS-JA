@@ -62,7 +62,7 @@ CREATE OR REPLACE FUNCTION public.obter_contexto_ponto_por_token(_token text)
 RETURNS jsonb
 LANGUAGE plpgsql
 SECURITY DEFINER
-SET search_path = pg_catalog, public
+SET search_path = pg_catalog, public, pg_temp
 AS $$
 DECLARE
   v_evento record;
