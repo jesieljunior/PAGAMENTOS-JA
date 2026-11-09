@@ -336,8 +336,8 @@ async function registrar(supabase: AdminClient, input: Record<string, unknown>) 
   if (config?.checkin_exige_selfie && !fotoBase64) {
     throw new RequestError("Esta agência exige selfie no registro de ponto.");
   }
-  if (config?.checkin_exige_selfie && input.consentiuSelfie !== true) {
-    throw new RequestError("Confirme o uso da selfie para revisão do registro.");
+  if (fotoBase64 && input.consentiuSelfie !== true) {
+    throw new RequestError("A selfie só pode ser enviada após consentimento explícito.");
   }
   if (config?.checkin_exige_gps && (lat === null || lng === null)) {
     throw new RequestError("Esta agência exige a localização no registro de ponto.");
