@@ -393,9 +393,19 @@ BEGIN
     VALUES (v_ev.empresa_id, _evento_id, _freelancer_id, v_ev.data_inicio, true)
     ON CONFLICT (evento_id, freelancer_id) DO UPDATE
       SET ativa = true, desativada_em = NULL, data_evento = excluded.data_evento, atualizado_em = now();
-  ELSE
-    UPDATE public.participacoes_operacionais SET ativa = false, desativada_em = now(), atualizado_em = now()
+  ELSIF v_ev.status = 'cancelado' THEN
+    UPDATE public.participacoes_operacionais
+    SET ativa = false, desativada_em = now(), atualizado_em = now()
     WHERE evento_id = _evento_id AND freelancer_id = _freelancer_id AND ativa;
+  ELSE
+    -- Remoção/substituição antes do início não conta. Depois que o evento
+    -- começou, preserva a participação confirmada para não apagar uso histórico.
+    UPDATE public.participacoes_operacionais
+    SET ativa = false, desativada_em = now(), atualizado_em = now()
+    WHERE evento_id = _evento_id
+      AND freelancer_id = _freelancer_id
+      AND ativa
+      AND data_evento > now();
   END IF;
 END; $$;
 
