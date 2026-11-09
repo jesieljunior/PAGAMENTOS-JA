@@ -490,16 +490,22 @@ export const Route = createFileRoute("/api/public/webhooks/asaas")({
             }
           }
 
-          // 5. Marca o registro na tabela webhook_eventos como concluído com sucesso
+          // 5. Só confirma HTTP 200 depois de persistir o estado terminal do evento.
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          await (supabaseAdmin as any)
+          const { data: eventoFinalizado, error: erroFinalizacao } = await (supabaseAdmin as any)
             .from("webhook_eventos")
             .update({
               status: "processado",
               erro: null,
               atualizado_em: new Date().toISOString(),
             })
-            .eq("chave_idempotencia", chaveIdempotencia);
+            .eq("chave_idempotencia", chaveIdempotencia)
+            .select("id")
+            .maybeSingle();
+
+          if (erroFinalizacao || !eventoFinalizado) {
+            throw new Error("Falha ao persistir a conclusão do webhook.");
+          }
 
           return new Response("ok", { status: 200 });
         } catch (procErr) {
