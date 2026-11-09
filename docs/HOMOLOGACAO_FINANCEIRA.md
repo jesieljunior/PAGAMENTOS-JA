@@ -37,6 +37,24 @@ HAVING COUNT(*) > 1;
 
 Resultado esperado: nenhuma linha. Se houver duplicidades, não apague lançamentos para fazer a migration passar. Reconcilie cada pagamento com o fechamento e a transferência correspondente no Asaas.
 
+Verifique também se um mesmo ID de cobrança Asaas foi associado a mais de um registro local:
+
+```sql
+SELECT parceiro_cobranca_id, COUNT(*) AS quantidade
+FROM public.cobrancas
+WHERE parceiro_cobranca_id IS NOT NULL
+GROUP BY parceiro_cobranca_id
+HAVING COUNT(*) > 1;
+
+SELECT referencia_provedor, COUNT(*) AS quantidade
+FROM public.faturas_plataforma
+WHERE referencia_provedor IS NOT NULL
+GROUP BY referencia_provedor
+HAVING COUNT(*) > 1;
+```
+
+Resultado esperado: nenhuma linha. A migration cria índices únicos parciais para impedir que um mesmo pagamento Asaas seja associado a duas cobranças operacionais ou duas faturas SaaS.
+
 ## 2. Pré-requisitos e ordem das migrations
 
 Não aplique apenas as duas migrations finais isoladamente. A liquidação de faturas depende da tabela `faturas_plataforma`, criada na migration de Billing V2, e as RPCs de Pix dependem dos estados adicionais do enum `status_pagamento`.
