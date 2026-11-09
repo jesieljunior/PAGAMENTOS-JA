@@ -363,6 +363,20 @@ BEGIN
     RAISE EXCEPTION 'TXID do pagamento diverge da transferência informada.';
   END IF;
 
+  -- Estados terminais não podem regredir por uma resposta antiga concorrente.
+  IF v_pagamento.status = 'executado' AND _status_final <> 'executado' THEN
+    RETURN jsonb_build_object(
+      'ok', true,
+      'ja_processada', true,
+      'status', 'executado',
+      'transferencia_id', _txid
+    );
+  END IF;
+
+  IF v_pagamento.status IN ('falhou', 'estornado') THEN
+    RAISE EXCEPTION 'Pagamento em estado terminal (%) exige reconciliação antes de nova efetivação.', v_pagamento.status;
+  END IF;
+
   UPDATE public.pagamentos
   SET status = _status_final::public.status_pagamento,
       txid_parceiro = _txid,
