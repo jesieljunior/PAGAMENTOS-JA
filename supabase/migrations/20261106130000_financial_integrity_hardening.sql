@@ -47,7 +47,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_movimentos_saldo_cobranca_credito
   WHERE cobranca_id IS NOT NULL AND tipo = 'credito';
 
 -- Um identificador de pagamento do Asaas não pode liquidar duas cobranças locais.
-DO $
+DO $$
 BEGIN
   IF EXISTS (
     SELECT 1
@@ -71,7 +71,7 @@ BEGIN
       'Há IDs de cobrança Asaas vinculados a mais de uma fatura SaaS. Reconcilie antes de aplicar a migration 20261106130000.';
   END IF;
 END;
-$;
+$$;
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_cobrancas_parceiro_cobranca_unique
   ON public.cobrancas (parceiro_cobranca_id)
