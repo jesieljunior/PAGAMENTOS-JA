@@ -27,6 +27,21 @@ BEGIN
 END;
 $$;
 
+DO $
+BEGIN
+  IF EXISTS (
+    SELECT 1
+    FROM public.movimentos_saldo
+    WHERE pagamento_id IS NOT NULL AND tipo IN ('debito', 'credito')
+    GROUP BY pagamento_id, tipo
+    HAVING count(*) > 1
+  ) THEN
+    RAISE EXCEPTION
+      'Há pagamentos com lançamentos contábeis duplicados. Reconcilie o ledger antes de aplicar a migration 20261106130000.';
+  END IF;
+END;
+$;
+
 CREATE UNIQUE INDEX IF NOT EXISTS idx_movimentos_saldo_cobranca_credito
   ON public.movimentos_saldo (cobranca_id)
   WHERE cobranca_id IS NOT NULL AND tipo = 'credito';
