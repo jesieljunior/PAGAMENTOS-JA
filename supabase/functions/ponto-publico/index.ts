@@ -405,9 +405,7 @@ async function registrar(supabase: AdminClient, input: Record<string, unknown>) 
   const resultado = resultadoRpc as { ok?: boolean; foraHorario?: boolean } | null;
   if (!resultado?.ok) {
     if (fotoUrl) {
-      const { error: erroRemocao } = await supabase.storage
-        .from("selfies-ponto")
-        .remove([fotoUrl]);
+      const { error: erroRemocao } = await supabase.storage.from("selfies-ponto").remove([fotoUrl]);
       if (erroRemocao) {
         console.error("[ponto-publico] Não foi possível remover selfie órfã:", erroRemocao);
       }
