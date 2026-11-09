@@ -3,11 +3,7 @@ import { z } from "zod";
 
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { createSupabasePublicClient } from "@/integrations/supabase/public.server";
-import {
-  type EscalaSessao,
-  type PontoSessao,
-  salvarSessaoEvento,
-} from "./ponto-store.server";
+import { type EscalaSessao, type PontoSessao, salvarSessaoEvento } from "./ponto-store.server";
 import { criarTokenQrCodeAssinado } from "./ponto.signed-token";
 
 // Suporta tokens padrão (ex: UUID ou hash) e tokens assinados (prefixo qr.)
@@ -288,28 +284,19 @@ export const sincronizarPontoEvento = createServerFn({ method: "POST" })
 export const obterContextoPonto = createServerFn({ method: "GET" })
   .validator((input: unknown) => tokenSchema.parse(input))
   .handler(async ({ data }) => {
-    return invokePontoEdge(
-      { action: "contexto", token: data.token },
-      contextoSchema,
-    );
+    return invokePontoEdge({ action: "contexto", token: data.token }, contextoSchema);
   });
 
 export const identificarNoPonto = createServerFn({ method: "POST" })
   .validator((input: unknown) => identificarSchema.parse(input))
   .handler(async ({ data }) => {
-    return invokePontoEdge(
-      { action: "identificar", ...data },
-      identificacaoResultSchema,
-    );
+    return invokePontoEdge({ action: "identificar", ...data }, identificacaoResultSchema);
   });
 
 export const confirmarPresenca = createServerFn({ method: "POST" })
   .validator((input: unknown) => identificarSchema.parse(input))
   .handler(async ({ data }) => {
-    return invokePontoEdge(
-      { action: "confirmar", ...data },
-      z.object({ ok: z.literal(true) }),
-    );
+    return invokePontoEdge({ action: "confirmar", ...data }, z.object({ ok: z.literal(true) }));
   });
 
 export const registrarPonto = createServerFn({ method: "POST" })
