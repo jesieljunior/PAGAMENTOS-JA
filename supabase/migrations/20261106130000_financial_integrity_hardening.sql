@@ -1,11 +1,15 @@
 -- =============================================================================
 -- Migração: 20261106130000_financial_integrity_hardening.sql
--- Proteções transacionais para funding, Pix de saída, estornos e credenciais.
+-- Proteções transacionais para funding, Pix de saída, estornos e faturamento SaaS.
 -- =============================================================================
 
--- A coluna é adicionada agora; a criptografia em si é executada no backend.
-ALTER TABLE public.mercado_pago_contas
-  ADD COLUMN IF NOT EXISTS client_secret_cifrado text;
+-- Auditoria do sistema: eventos automáticos não possuem usuário humano.
+ALTER TABLE public.logs_auditoria ALTER COLUMN ator_id DROP NOT NULL;
+DO $$ BEGIN
+ IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid='public.logs_auditoria'::regclass AND conname='logs_auditoria_ator_sistema_check') THEN
+  ALTER TABLE public.logs_auditoria ADD CONSTRAINT logs_auditoria_ator_sistema_check CHECK (ator_id IS NOT NULL OR ator_contexto='sistema') NOT VALID;
+ END IF;
+END $$;
 
 -- Não cria índice único às cegas se já houver duplicidade histórica.
 DO $$
@@ -87,8 +91,8 @@ BEGIN
       'sistema',
       'cobranca_operacional_duplicada',
       'cobranca',
-      _cobranca_id::text,
-      'alerta',
+      _cobranca_id,
+      'falha',
       jsonb_build_object(
         'parceiro_original', v_cobranca.parceiro_cobranca_id,
         'parceiro_recebido', _parceiro_id,
@@ -469,7 +473,7 @@ BEGIN
     RAISE EXCEPTION 'Valor recebido (%) diverge do total da fatura (%).', _valor, v_fatura.total;
   END IF;
 
-  IF v_fatura.status IN ('pago', 'paga') THEN
+  IF v_fatura.status = 'paga' THEN
     IF v_fatura.referencia_provedor = _parceiro_id THEN
       RETURN jsonb_build_object('ok', true, 'ja_paga', true, 'fatura_id', _fatura_id);
     END IF;
@@ -481,8 +485,8 @@ BEGIN
       'sistema',
       'fatura_saas_cobranca_duplicada',
       'fatura_plataforma',
-      _fatura_id::text,
-      'alerta',
+      _fatura_id,
+      'falha',
       jsonb_build_object(
         'parceiro_original', v_fatura.referencia_provedor,
         'parceiro_recebido', _parceiro_id,
@@ -492,7 +496,7 @@ BEGIN
     RETURN jsonb_build_object('ok', true, 'ja_paga', true, 'cobranca_duplicada', true, 'fatura_id', _fatura_id);
   END IF;
 
-  IF v_fatura.status NOT IN ('pendente', 'vencida', 'aguardando_pagamento') THEN
+  IF v_fatura.status NOT IN ('pendente', 'atrasada') THEN
     RAISE EXCEPTION 'Status da fatura não permite liquidação: %', v_fatura.status;
   END IF;
 
@@ -528,7 +532,7 @@ BEGIN
   END IF;
 
   UPDATE public.faturas_plataforma
-  SET status = 'pago',
+  SET status = 'paga',
       referencia_provedor = _parceiro_id,
       provedor = 'asaas',
       pago_em = now(),
@@ -551,7 +555,7 @@ BEGIN
     'sistema',
     'fatura_plataforma_liquidada_asaas',
     'fatura_plataforma',
-    _fatura_id::text,
+    _fatura_id,
     'sucesso',
     jsonb_build_object('provedor', 'asaas', 'parceiro_id', _parceiro_id, 'valor', _valor)
   );
