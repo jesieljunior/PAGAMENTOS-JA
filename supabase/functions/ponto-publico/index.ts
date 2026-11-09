@@ -128,7 +128,7 @@ async function comLimiteDeTentativas<T>(
   supabase: AdminClient,
   request: Request,
   token: string,
-  cpf: string,
+  cpf: string | null,
   action: string,
   operation: () => Promise<T>,
 ): Promise<T> {
@@ -138,7 +138,7 @@ async function comLimiteDeTentativas<T>(
     "indisponivel";
   const tokenHash = await hash(token);
   const ipHash = await hash(ip);
-  const cpfHash = await hash(cpf);
+  const cpfHash = cpf ? await hash(cpf) : null;
 
   const iniciarTentativa = supabase.rpc as unknown as (
     nome: string,
@@ -471,7 +471,9 @@ Deno.serve(async (request: Request) => {
 
     let result: unknown;
     if (action === "contexto") {
-      result = await obterContexto(supabase, token);
+      result = await comLimiteDeTentativas(supabase, request, token, null, action, () =>
+        obterContexto(supabase, token),
+      );
     } else if (action === "identificar" || action === "confirmar" || action === "registrar") {
       const cpf = cpfValue(body.cpf);
       if (action === "identificar") {
