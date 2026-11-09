@@ -663,6 +663,44 @@ export const selecionarPlanoEmpresa = createServerFn({ method: "POST" })
           referenciaExterna: faturaId,
         });
 
+        // Persiste o ID do Asaas para conciliação direta. Se esta gravação falhar,
+        // não recria a cobrança: o webhook e a confirmação manual ainda podem
+        // localizar a fatura pela externalReference (faturaId).
+        if (cobrancaAsaas.id) {
+          const dadosReferencia = {
+            referencia_provedor: cobrancaAsaas.id,
+            provedor: "asaas",
+            atualizado_em: new Date().toISOString(),
+          };
+          let referenciaPersistida = false;
+
+          if (admin) {
+            const { error } = await admin
+              .from("faturas_plataforma")
+              .update(dadosReferencia)
+              .eq("id", faturaId)
+              .eq("empresa_id", empresaId);
+            referenciaPersistida = !error;
+            if (error) {
+              console.error("[selecionarPlanoEmpresa] Falha ao persistir referência Asaas:", error);
+            }
+          }
+
+          if (!referenciaPersistida) {
+            const { error } = await client
+              .from("faturas_plataforma")
+              .update(dadosReferencia)
+              .eq("id", faturaId)
+              .eq("empresa_id", empresaId);
+            if (error) {
+              console.error(
+                "[selecionarPlanoEmpresa] Referência Asaas não persistida; conciliação usará externalReference:",
+                error,
+              );
+            }
+          }
+        }
+
         if (cobrancaAsaas.invoiceUrl) {
           checkoutUrlReal = cobrancaAsaas.invoiceUrl;
         }
