@@ -338,7 +338,7 @@ export const Route = createFileRoute("/api/public/webhooks/asaas")({
           }
 
           if (evento === "PAYMENT_OVERDUE" && corpo.payment?.id) {
-            const atualizacaoCobrancaVencida = { status: "vencido" };
+            const atualizacaoCobrancaVencida = { status: "vencido" as const };
             const { error: erroCobrancaPorParceiro } = await supabaseAdmin
               .from("cobrancas")
               .update(atualizacaoCobrancaVencida)
