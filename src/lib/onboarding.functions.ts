@@ -66,9 +66,8 @@ export const concluirCadastroComEmpresaEPlano = createServerFn({ method: "POST" 
 
     // 3. Identifica plano escolhido
     const planoEscolhido =
-      PLANOS_CATALOGO.find(
-        (p) => p.id === data.planoId || p.codigo === data.planoCodigo,
-      ) || PLANOS_CATALOGO[0]!;
+      PLANOS_CATALOGO.find((p) => p.id === data.planoId || p.codigo === data.planoCodigo) ||
+      PLANOS_CATALOGO[0]!;
 
     const ehGratuito = planoEscolhido.codigo === "free" || planoEscolhido.mensalidade === 0;
 
