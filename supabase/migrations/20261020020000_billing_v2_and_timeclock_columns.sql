@@ -676,6 +676,9 @@ BEGIN
  IF v_id IS NOT NULL THEN RETURN v_id; END IF;
  p:=public.plano_da_empresa(_empresa_id);
  SELECT * INTO a FROM public.assinaturas WHERE empresa_id=_empresa_id;
+ IF a.id IS NOT NULL AND a.status NOT IN ('ativa','trial','em_trial','pendente','aguardando_pagamento') THEN
+   RETURN NULL;
+ END IF;
  SELECT * INTO cp FROM public.cupons WHERE id=a.cupom_id AND ativo AND (validade IS NULL OR validade>=c.inicio::date) AND (empresa_id IS NULL OR empresa_id=_empresa_id) AND (limite_usos IS NULL OR usos<limite_usos);
  INSERT INTO public.ciclos_cobranca(empresa_id,assinatura_id,plano_id,plano_nome,inicio,fim,mensalidade,participacoes_incluidas,valor_excedente,desconto_tipo,desconto_valor,trial_ate)
  VALUES(_empresa_id,a.id,p.id,p.nome,c.inicio,c.fim,coalesce(a.mensalidade_override,p.mensalidade),p.participacoes_incluidas,p.valor_excedente,cp.tipo,coalesce(cp.valor,0),a.trial_ate) RETURNING id INTO v_id;
@@ -686,6 +689,7 @@ REVOKE ALL ON FUNCTION public.abrir_ciclo_cobranca(uuid) FROM PUBLIC,anon,authen
 GRANT EXECUTE ON FUNCTION public.abrir_ciclo_cobranca(uuid) TO service_role;
 INSERT INTO public.ciclos_cobranca(empresa_id,assinatura_id,plano_id,plano_nome,inicio,fim,mensalidade,participacoes_incluidas,valor_excedente,trial_ate)
 SELECT a.empresa_id,a.id,p.id,p.nome,c.inicio,c.fim,coalesce(a.mensalidade_override,p.mensalidade),p.participacoes_incluidas,p.valor_excedente,a.trial_ate FROM public.assinaturas a JOIN public.planos p ON p.id=a.plano_id CROSS JOIN LATERAL public.ciclo_da_empresa(a.empresa_id,now()) c
+WHERE a.status IN ('ativa','trial','em_trial','pendente','aguardando_pagamento')
 ON CONFLICT (empresa_id, inicio) DO NOTHING;
 CREATE OR REPLACE FUNCTION public.fechar_fatura_ciclo(_empresa_id uuid,_ref timestamptz)
 RETURNS uuid LANGUAGE plpgsql SECURITY DEFINER SET search_path=public AS $$
