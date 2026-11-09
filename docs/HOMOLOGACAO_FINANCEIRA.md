@@ -168,6 +168,29 @@ SELECT
 
 Resultados esperados: todas as colunas `authenticated_pode_*` devem ser `false`; todas as colunas `service_role_pode_*` devem ser `true`.
 
+Valide também que nenhuma RPC legada do QR Code continue acessível publicamente e que o backend mantenha a permissão necessária:
+
+```sql
+SELECT
+  has_function_privilege(
+    'anon',
+    'public.obter_contexto_ponto_por_token(text)',
+    'EXECUTE'
+  ) AS anon_pode_consultar_contexto_qr,
+  has_function_privilege(
+    'authenticated',
+    'public.obter_contexto_ponto_por_token(text)',
+    'EXECUTE'
+  ) AS authenticated_pode_consultar_contexto_qr,
+  has_function_privilege(
+    'service_role',
+    'public.obter_contexto_ponto_por_token(text)',
+    'EXECUTE'
+  ) AS service_role_pode_consultar_contexto_qr;
+```
+
+Resultado esperado: `false`, `false`, `true`, respectivamente. A função pública antiga não deve ser usada pelo navegador; o fluxo deve passar pela Edge Function.
+
 Confirme também que as assinaturas antigas foram removidas:
 
 ```sql
