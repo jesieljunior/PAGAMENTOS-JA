@@ -124,6 +124,45 @@ async function hash(value: string): Promise<string> {
   );
 }
 
+async function lerJsonLimitado(request: Request, limiteBytes = 6 * 1024 * 1024): Promise<unknown> {
+  const tamanhoDeclarado = Number(request.headers.get("content-length"));
+  if (Number.isFinite(tamanhoDeclarado) && tamanhoDeclarado > limiteBytes) {
+    throw new RequestError("A requisição excede o limite de tamanho permitido.", 413);
+  }
+
+  const reader = request.body?.getReader();
+  if (!reader) throw new RequestError("Corpo da requisição ausente.");
+
+  const partes: Uint8Array[] = [];
+  let totalBytes = 0;
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    if (!value) continue;
+
+    totalBytes += value.byteLength;
+    if (totalBytes > limiteBytes) {
+      await reader.cancel();
+      throw new RequestError("A requisição excede o limite de tamanho permitido.", 413);
+    }
+    partes.push(value);
+  }
+
+  const bytes = new Uint8Array(totalBytes);
+  let deslocamento = 0;
+  for (const parte of partes) {
+    bytes.set(parte, deslocamento);
+    deslocamento += parte.byteLength;
+  }
+
+  try {
+    return JSON.parse(new TextDecoder().decode(bytes)) as unknown;
+  } catch {
+    throw new RequestError("JSON da requisição inválido.");
+  }
+}
+
 async function comLimiteDeTentativas<T>(
   supabase: AdminClient,
   request: Request,
@@ -461,7 +500,7 @@ Deno.serve(async (request: Request) => {
       auth: { persistSession: false, autoRefreshToken: false },
     });
 
-    const input: unknown = await request.json();
+    const input = await lerJsonLimitado(request);
     if (!input || typeof input !== "object" || Array.isArray(input)) {
       throw new RequestError("Requisição inválida.");
     }
