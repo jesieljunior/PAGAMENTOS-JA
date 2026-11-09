@@ -19,6 +19,10 @@ BEGIN
 END $$;
 
 -- 2. Atualização e resiliência da tabela webhook_eventos
+-- Webhooks são autenticados pelo segredo do provedor e processados pelo backend.
+-- Usuários autenticados não podem inserir eventos falsos nem reservar chaves de idempotência.
+REVOKE ALL ON TABLE public.webhook_eventos FROM PUBLIC, anon, authenticated;
+GRANT ALL ON TABLE public.webhook_eventos TO service_role;
 ALTER TABLE public.webhook_eventos DROP CONSTRAINT IF EXISTS webhook_eventos_status_check;
 ALTER TABLE public.webhook_eventos ADD CONSTRAINT webhook_eventos_status_check
   CHECK (status IN ('processando', 'processado', 'falhou', 'falha'));
