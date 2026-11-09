@@ -73,6 +73,7 @@ Para completar o schema de ponto e faturamento e depois aplicar as proteções f
 6. `20261104140000_finance_tenant_security_and_saas_invoicing.sql` — reforça isolamento de tenant e instala a liquidação inicial de faturas.
 7. `20261105130000_harden_saas_invoice_settlement.sql` — restringe a liquidação de faturas a `service_role`.
 8. `20261106130000_financial_integrity_hardening.sql` — instala as proteções transacionais finais para funding, Pix de saída, estornos e faturas SaaS.
+9. `20261109120000_seed_billing_v2_plans.sql` — insere o catálogo inicial de planos apenas quando o ID/código ainda não existir; não sobrescreve preços ou limites já configurados.
 
 A migration final não configura nem altera credenciais do Mercado Pago. A aplicação está sendo homologada com Asaas.
 
@@ -83,6 +84,7 @@ A inspeção foi feita em modo somente leitura no projeto **JÁ - BANCO DE DADOS
 - O histórico retornado pelo Supabase está vazio e a relação `supabase_migrations.schema_migrations` não existe. Portanto, não é possível usar o histórico padrão para decidir quais arquivos já foram aplicados.
 - O schema está parcialmente adiantado: `tentativas_ponto_publico`, `auditoria_ponto_publico` e as colunas de QR Code/evidência já existem.
 - As tabelas centrais do Billing V2 — `faturas_plataforma`, `participacoes_operacionais` e `ciclos_cobranca` — ainda não existem.
+- A tabela `planos` existe, mas está vazia. A interface possui catálogo estático de fallback, porém as funções de banco dependem de registros reais em `planos`; a nova migration de seed cobre a instalação inicial sem sobrescrever configurações existentes.
 - O enum `status_pagamento` ainda contém somente `pendente`, `agendado`, `executado` e `falhou`.
 - A RPC `obter_contexto_ponto_por_token` existe na versão simples da migration `20261027`; as RPCs adicionais de `20261028` (`identificar_no_ponto_publico`, `confirmar_presenca_ponto_publico` e `registrar_ponto_publico`) não foram encontradas.
 - As policies restritivas de leitura de fechamentos e pagamentos já existem, criadas por uma migration anterior. A migration Billing V2 foi ajustada para substituí-las sem erro.
