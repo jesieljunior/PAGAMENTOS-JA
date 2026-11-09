@@ -1572,7 +1572,6 @@ export type Database = {
         };
         Update: {
           access_token_cifrado?: string;
-          client_secret_cifrado?: string | null;
           atualizado_em?: string;
           criado_em?: string;
           empresa_id?: string;
