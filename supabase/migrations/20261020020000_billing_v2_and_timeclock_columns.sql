@@ -15,7 +15,7 @@ ALTER TABLE public.pontos
   ADD COLUMN IF NOT EXISTS selfie_consentimento_aceito_em timestamp with time zone,
   ADD COLUMN IF NOT EXISTS selfie_expira_em timestamp with time zone;
 
-CREATE TABLE public.tentativas_ponto_publico (
+CREATE TABLE IF NOT EXISTS public.tentativas_ponto_publico (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   token_hash text NOT NULL,
   cpf_hash text,
@@ -26,10 +26,10 @@ CREATE TABLE public.tentativas_ponto_publico (
 );
 GRANT ALL ON public.tentativas_ponto_publico TO service_role;
 ALTER TABLE public.tentativas_ponto_publico ENABLE ROW LEVEL SECURITY;
-CREATE INDEX tentativas_ponto_token_ip_idx ON public.tentativas_ponto_publico (token_hash, ip_hash, criado_em DESC);
-CREATE INDEX tentativas_ponto_cpf_idx ON public.tentativas_ponto_publico (cpf_hash, criado_em DESC) WHERE cpf_hash IS NOT NULL;
+CREATE INDEX IF NOT EXISTS tentativas_ponto_token_ip_idx ON public.tentativas_ponto_publico (token_hash, ip_hash, criado_em DESC);
+CREATE INDEX IF NOT EXISTS tentativas_ponto_cpf_idx ON public.tentativas_ponto_publico (cpf_hash, criado_em DESC) WHERE cpf_hash IS NOT NULL;
 
-CREATE TABLE public.auditoria_ponto_publico (
+CREATE TABLE IF NOT EXISTS public.auditoria_ponto_publico (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   empresa_id uuid NOT NULL REFERENCES public.empresas(id) ON DELETE CASCADE,
   escala_id uuid REFERENCES public.escalas(id) ON DELETE SET NULL,
@@ -42,13 +42,14 @@ CREATE TABLE public.auditoria_ponto_publico (
 GRANT SELECT ON public.auditoria_ponto_publico TO authenticated;
 GRANT ALL ON public.auditoria_ponto_publico TO service_role;
 ALTER TABLE public.auditoria_ponto_publico ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "auditoria ponto leitura supervisao" ON public.auditoria_ponto_publico;
 CREATE POLICY "auditoria ponto leitura supervisao"
 ON public.auditoria_ponto_publico FOR SELECT TO authenticated
 USING (
   empresa_id = public.empresa_atual()
   AND public.tem_capacidade(auth.uid(), 'operacao.supervisionar')
 );
-CREATE INDEX auditoria_ponto_empresa_idx ON public.auditoria_ponto_publico (empresa_id, criado_em DESC);
+CREATE INDEX IF NOT EXISTS auditoria_ponto_empresa_idx ON public.auditoria_ponto_publico (empresa_id, criado_em DESC);
 
 CREATE OR REPLACE FUNCTION public.validar_ponto_decidido()
 RETURNS trigger
