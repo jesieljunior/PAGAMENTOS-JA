@@ -495,7 +495,7 @@ LANGUAGE sql
 STABLE
 SECURITY DEFINER
 SET search_path = pg_catalog, public
-AS $
+AS $$
   SELECT EXISTS (
     SELECT 1
     FROM public.escalas s
@@ -513,7 +513,7 @@ AS $
         OR (a.status IN ('trial', 'em_trial') AND a.trial_ate > now())
       )
   );
-$;
+$$;
 
 REVOKE ALL ON FUNCTION public.pode_enviar_selfie_ponto(text, text) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION public.pode_enviar_selfie_ponto(text, text)
@@ -529,9 +529,7 @@ CREATE POLICY "selfies_insert_publico" ON storage.objects
   FOR INSERT TO anon, authenticated
   WITH CHECK (
     bucket_id = 'selfies-ponto'
-    AND name ~* '^(publico|[0-9a-f-]{36})/[0-9a-f-]{36}/[0-9a-f-]{8}-[0-9a-f-]{4}-[0-9a-f-]{4}-[0-9a-f-]{4}-[0-9a-f-]{12}\\.(jpg|png|webp)
-
-
+    AND name ~* '^(publico|[0-9a-f-]{36})/[0-9a-f-]{36}/[0-9a-f-]{8}-[0-9a-f-]{4}-[0-9a-f-]{4}-[0-9a-f-]{4}-[0-9a-f-]{12}\.(jpg|png|webp)$'
     AND (
       (
         (storage.foldername(name))[1] = 'publico'
