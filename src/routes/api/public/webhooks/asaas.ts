@@ -12,8 +12,12 @@ import { gerarChaveWebhookAsaas, type EventoAsaasWebhook } from "@/lib/webhook-i
 
 type EventoAsaas = EventoAsaasWebhook;
 
-const EVENTOS_FATURA_SAAS = new Set(["PAYMENT_RECEIVED", "PAYMENT_CONFIRMED"]);
-const EVENTOS_CREDITO_SALDO = new Set(["PAYMENT_RECEIVED"]);
+const EVENTOS_FATURA_SAAS = new Set([
+  "PAYMENT_RECEIVED",
+  "PAYMENT_CONFIRMED",
+  "PAYMENT_RECEIVED_IN_CASH",
+]);
+const EVENTOS_CREDITO_SALDO = new Set(["PAYMENT_RECEIVED", "PAYMENT_RECEIVED_IN_CASH"]);
 
 type ResultadoRpcFinanceira = {
   ok?: boolean;
@@ -233,8 +237,8 @@ export const Route = createFileRoute("/api/public/webhooks/asaas")({
             }
           }
 
-          // 2.1 Crédito de cobranças operacionais: somente quando o Asaas informa
-          // PAYMENT_RECEIVED (saldo disponibilizado), nunca apenas PAYMENT_CONFIRMED.
+          // 2.1 Crédito operacional somente para pagamentos efetivamente recebidos;
+          // PAYMENT_CONFIRMED isolado não disponibiliza saldo.
           if (EVENTOS_CREDITO_SALDO.has(evento) && corpo.payment?.id) {
             const parceiroId = corpo.payment.id;
             let cobrancaLocal: {
