@@ -392,7 +392,13 @@ BEGIN
     INSERT INTO public.participacoes_operacionais (empresa_id, evento_id, freelancer_id, data_evento, ativa)
     VALUES (v_ev.empresa_id, _evento_id, _freelancer_id, v_ev.data_inicio, true)
     ON CONFLICT (evento_id, freelancer_id) DO UPDATE
-      SET ativa = true, desativada_em = NULL, data_evento = excluded.data_evento, atualizado_em = now();
+      SET ativa = true, desativada_em = NULL,
+          data_evento = CASE
+            WHEN public.participacoes_operacionais.data_evento <= now()
+              THEN public.participacoes_operacionais.data_evento
+            ELSE excluded.data_evento
+          END,
+          atualizado_em = now();
   ELSIF v_ev.status = 'cancelado' THEN
     UPDATE public.participacoes_operacionais
     SET ativa = false, desativada_em = now(), atualizado_em = now()
