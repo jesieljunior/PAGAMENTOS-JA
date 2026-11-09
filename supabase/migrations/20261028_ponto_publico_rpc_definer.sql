@@ -506,5 +506,12 @@ CREATE POLICY "selfies_select_empresa" ON storage.objects
   USING (
     bucket_id = 'selfies-ponto'
     AND (storage.foldername(name))[1] = public.empresa_atual()::text
+    AND EXISTS (
+      SELECT 1
+      FROM public.usuarios u
+      WHERE u.id = auth.uid()
+        AND u.empresa_id::text = (storage.foldername(name))[1]
+        AND u.ativo = true
+    )
     AND public.tem_capacidade(auth.uid(), 'operacao.supervisionar')
   );
