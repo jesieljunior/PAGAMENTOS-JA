@@ -69,7 +69,10 @@ async function validarAcessoPonto(supabase: AdminClient, empresaId: string): Pro
     (assinatura?.status === "trial" || assinatura?.status === "em_trial") &&
     Boolean(assinatura?.trial_ate && new Date(assinatura.trial_ate).getTime() > Date.now());
   if (!empresa?.ativa || !(assinatura?.status === "ativa" || trialValido)) {
-    throw new RequestError("A agência ou a assinatura não está habilitada para registro de ponto.", 403);
+    throw new RequestError(
+      "A agência ou a assinatura não está habilitada para registro de ponto.",
+      403,
+    );
   }
 }
 
@@ -337,12 +340,18 @@ async function registrar(supabase: AdminClient, input: Record<string, unknown>) 
         .from("selfies-ponto")
         .upload(caminho, bytes, { contentType: `image/${formato}`, upsert: false });
       if (error) {
-        throw new RequestError("Não foi possível armazenar a selfie. Nenhuma marcação foi registrada.", 500);
+        throw new RequestError(
+          "Não foi possível armazenar a selfie. Nenhuma marcação foi registrada.",
+          500,
+        );
       }
       fotoUrl = caminho;
     } catch (error) {
       if (error instanceof RequestError) throw error;
-      throw new RequestError("Não foi possível armazenar a selfie. Nenhuma marcação foi registrada.", 500);
+      throw new RequestError(
+        "Não foi possível armazenar a selfie. Nenhuma marcação foi registrada.",
+        500,
+      );
     }
   }
 
@@ -365,7 +374,11 @@ async function registrar(supabase: AdminClient, input: Record<string, unknown>) 
     throw new RequestError(`O próximo registro deve ser ${esperado.replaceAll("_", " ")}.`);
   }
 
-  const { data: resultadoRpc, error: erroRpc } = await (supabase.rpc as any)(
+  const chamarRpc = supabase.rpc as unknown as (
+    nome: string,
+    argumentos: Record<string, unknown>,
+  ) => PromiseLike<{ data: unknown; error: { message: string } | null }>;
+  const { data: resultadoRpc, error: erroRpc } = await chamarRpc(
     "registrar_ponto_publico",
     {
       _token: token,
@@ -381,9 +394,7 @@ async function registrar(supabase: AdminClient, input: Record<string, unknown>) 
 
   if (erroRpc) {
     if (fotoUrl) {
-      const { error: erroRemocao } = await supabase.storage
-        .from("selfies-ponto")
-        .remove([fotoUrl]);
+      const { error: erroRemocao } = await supabase.storage.from("selfies-ponto").remove([fotoUrl]);
       if (erroRemocao) {
         console.error("[ponto-publico] Não foi possível remover selfie órfã:", erroRemocao);
       }
