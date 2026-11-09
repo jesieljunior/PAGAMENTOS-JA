@@ -322,4 +322,4 @@ Consultas somente de leitura no projeto de teste confirmaram:
 
 **Decisão técnica:** não executar `supabase db push` nem marcar migrations como aplicadas com base apenas na existência de alguns objetos. Primeiro é necessário concluir o diff de cada migration contra o banco e definir uma estratégia de baseline/reconciliação. Nenhuma alteração foi aplicada ao Supabase durante esta revisão.
 
-**CI #274:** aprovado. ESLint, build, TypeScript, varredura de segredos/PII, Vitest, análise SQL das 32 migrations e aplicação de todas as migrations em um Supabase local limpo passaram. Isso valida a cadeia versionada em banco novo, mas não resolve automaticamente a divergência do banco remoto de teste.
+**CI #276:** aprovado no HEAD atual. ESLint, build, TypeScript, varredura de segredos/PII, Vitest, análise SQL das 32 migrations e aplicação de todas as migrations em um Supabase local limpo passaram. Isso valida a cadeia versionada em banco novo, mas não resolve automaticamente a divergência do banco remoto de teste.
