@@ -32,9 +32,8 @@ BEGIN
     RAISE EXCEPTION 'Parâmetros de rate limit inválidos';
   END IF;
 
-  PERFORM pg_advisory_xact_lock(
-    hashtextextended(_token_hash || ':' || _ip_hash, 0)
-  );
+  -- O lock global do QR serializa os três limites, inclusive quando IPs diferem.
+  PERFORM pg_advisory_xact_lock(hashtextextended(_token_hash, 0));
 
   -- Limite global por QR para conter ataques distribuídos sem afetar eventos usuais.
   SELECT count(*)::integer
