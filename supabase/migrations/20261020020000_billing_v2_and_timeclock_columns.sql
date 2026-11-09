@@ -159,8 +159,13 @@ COMMENT ON COLUMN public.planos.percentual IS 'DEPRECATED: cobrança percentual 
 COMMENT ON COLUMN public.planos.taxa_fixa_pix IS 'DEPRECATED: substituída pelo excedente de participações';
 COMMENT ON COLUMN public.planos.modelo IS 'DEPRECATED: V2 usa mensalidade + excedente de participações';
 
-ALTER TABLE public.assinaturas ADD COLUMN IF NOT EXISTS inicio_ciclo timestamptz NOT NULL DEFAULT now();
-UPDATE public.assinaturas SET inicio_ciclo = criado_em;
+ALTER TABLE public.assinaturas ADD COLUMN IF NOT EXISTS inicio_ciclo timestamptz;
+UPDATE public.assinaturas
+SET inicio_ciclo = COALESCE(criado_em, now())
+WHERE inicio_ciclo IS NULL;
+ALTER TABLE public.assinaturas
+  ALTER COLUMN inicio_ciclo SET DEFAULT now(),
+  ALTER COLUMN inicio_ciclo SET NOT NULL;
 COMMENT ON COLUMN public.assinaturas.percentual_override IS 'DEPRECATED: cobrança percentual descartada na V2';
 COMMENT ON COLUMN public.assinaturas.taxa_fixa_override IS 'DEPRECATED: cobrança por Pix descartada na V2';
 COMMENT ON TABLE public.taxas_plataforma IS 'DEPRECATED para novos lançamentos: histórico do modelo percentual/Asaas';
