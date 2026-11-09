@@ -411,7 +411,7 @@ export const selecionarPlanoEmpresa = createServerFn({ method: "POST" })
     // Antes de criar outra cobrança, reconcilia qualquer fatura ainda pendente.
     // Uma resposta perdida do Asaas nunca deve gerar uma segunda cobrança automática.
     if (plano.mensalidade > 0) {
-      let consultaFaturaPendente = await client
+      const consultaFaturaPendente = await (admin ?? client)
         .from("faturas_plataforma")
         .select("id, plano_id, total, status, referencia_provedor, vencimento")
         .eq("empresa_id", empresaId)
@@ -419,17 +419,6 @@ export const selecionarPlanoEmpresa = createServerFn({ method: "POST" })
         .order("criado_em", { ascending: false })
         .limit(2)
         .maybeSingle();
-
-      if (consultaFaturaPendente.error && admin) {
-        consultaFaturaPendente = await admin
-          .from("faturas_plataforma")
-          .select("id, plano_id, total, status, referencia_provedor, vencimento")
-          .eq("empresa_id", empresaId)
-          .in("status", ["pendente", "atrasada"])
-          .order("criado_em", { ascending: false })
-          .limit(2)
-          .maybeSingle();
-      }
 
       if (consultaFaturaPendente.error) {
         throw new Error("Não foi possível verificar cobranças SaaS pendentes.");
