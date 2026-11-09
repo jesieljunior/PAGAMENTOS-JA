@@ -1,6 +1,5 @@
 {
   "name": "pagamentos-ja",
-  "description": "Já — Plataforma B2B de Gestão de Equipes, Ponto Antifraude e Pagamentos Pix",
   "private": true,
   "sideEffects": false,
   "type": "module",
@@ -13,8 +12,7 @@
     "lint": "eslint .",
     "format": "prettier --write .",
     "typecheck": "tsc --noEmit",
-    "scan:secrets": "node scripts/scan-secrets.mjs",
-    "migrate:mercadopago-credentials": "node scripts/migrate-mercado-pago-credentials.mjs"
+    "scan:secrets": "node scripts/scan-secrets.mjs"
   },
   "overrides": {
     "rolldown": "1.2.1"
