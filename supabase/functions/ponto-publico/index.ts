@@ -45,6 +45,34 @@ function tokenValue(value: unknown): string {
   return token;
 }
 
+function validarEventoOperacional(status: string): void {
+  if (["fechamento", "pagamento", "concluido", "arquivado", "cancelado"].includes(status)) {
+    throw new RequestError("Este evento não está disponível para registro de ponto.");
+  }
+}
+
+async function validarAcessoPonto(supabase: AdminClient, empresaId: string): Promise<void> {
+  const [{ data: empresa, error: erroEmpresa }, { data: assinatura, error: erroAssinatura }] =
+    await Promise.all([
+      supabase.from("empresas").select("ativa").eq("id", empresaId).maybeSingle(),
+      supabase
+        .from("assinaturas")
+        .select("status, trial_ate")
+        .eq("empresa_id", empresaId)
+        .maybeSingle(),
+    ]);
+
+  failIfError(erroEmpresa, "Não foi possível validar a agência");
+  failIfError(erroAssinatura, "Não foi possível validar a assinatura");
+
+  const trialValido =
+    (assinatura?.status === "trial" || assinatura?.status === "em_trial") &&
+    Boolean(assinatura.trial_ate && new Date(assinatura.trial_ate).getTime() > Date.now());
+  if (!empresa?.ativa || !(assinatura?.status === "ativa" || trialValido)) {
+    throw new RequestError("A agência ou a assinatura não está habilitada para registro de ponto.", 403);
+  }
+}
+
 function validarValidadeQr(evento: {
   data_fim: string | null;
   qr_code_expira_em: string | null;
@@ -139,21 +167,25 @@ async function comLimiteDeTentativas<T>(
 async function localizarEscala(supabase: AdminClient, token: string, cpf: string) {
   const { data: evento, error: erroEvento } = await supabase
     .from("eventos")
-    .select("id, empresa_id, data_fim, qr_code_expira_em")
+    .select("id, empresa_id, status, data_inicio, data_fim, qr_code_expira_em")
     .eq("qr_code_token", token)
     .maybeSingle();
   failIfError(erroEvento, "Não foi possível localizar o evento do QR Code");
   if (!evento) throw new RequestError("QR Code inválido.");
+  validarEventoOperacional(evento.status);
+  await validarAcessoPonto(supabase, evento.empresa_id);
   validarValidadeQr(evento);
 
   const { data: freelancer, error: erroFreelancer } = await supabase
     .from("freelancers")
-    .select("id, nome")
+    .select("id, nome, ativo")
     .eq("empresa_id", evento.empresa_id)
     .eq("cpf", cpf)
     .maybeSingle();
   failIfError(erroFreelancer, "Não foi possível localizar o colaborador");
-  if (!freelancer) throw new RequestError("CPF não encontrado nesta agência.");
+  if (!freelancer || !freelancer.ativo) {
+    throw new RequestError("CPF não encontrado ou colaborador inativo nesta agência.");
+  }
 
   const { data: equipes, error: erroEquipes } = await supabase
     .from("equipes")
@@ -187,6 +219,8 @@ async function obterContexto(supabase: AdminClient, token: string) {
     .maybeSingle();
   failIfError(erroEvento, "Não foi possível consultar o QR Code");
   if (!evento) throw new RequestError("QR Code inválido ou expirado.");
+  validarEventoOperacional(evento.status);
+  await validarAcessoPonto(supabase, evento.empresa_id);
 
   const expiraEm = validarValidadeQr(evento);
   const { data: config, error: erroConfig } = await supabase
@@ -302,13 +336,13 @@ async function registrar(supabase: AdminClient, input: Record<string, unknown>) 
       const { error } = await supabase.storage
         .from("selfies-ponto")
         .upload(caminho, bytes, { contentType: `image/${formato}`, upsert: false });
-      if (!error) {
-        fotoUrl = caminho;
-      } else {
-        fotoUrl = fotoBase64;
+      if (error) {
+        throw new RequestError("Não foi possível armazenar a selfie. Nenhuma marcação foi registrada.", 500);
       }
-    } catch {
-      fotoUrl = fotoBase64;
+      fotoUrl = caminho;
+    } catch (error) {
+      if (error instanceof RequestError) throw error;
+      throw new RequestError("Não foi possível armazenar a selfie. Nenhuma marcação foi registrada.", 500);
     }
   }
 
@@ -332,7 +366,10 @@ async function registrar(supabase: AdminClient, input: Record<string, unknown>) 
   }
 
   const agora = new Date();
-  const foraHorario = Boolean(evento.data_fim && agora > new Date(evento.data_fim));
+  const foraHorario = Boolean(
+    (evento.data_inicio && agora < new Date(evento.data_inicio)) ||
+      (evento.data_fim && agora > new Date(evento.data_fim)),
+  );
   const retencaoDias = Math.min(
     config?.selfie_retencao_dias ?? 90,
     plano?.retencao_evidencias_dias ?? 365,
