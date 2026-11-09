@@ -217,7 +217,7 @@ Resultado esperado: nenhuma linha. Se houver registros antigos, reconcilie com o
 
 ## 6. Pendências funcionais que ainda bloqueiam a homologação
 
-- O fluxo `selecionarPlanoEmpresa` cria uma fatura imediatamente com `ciclo_inicio = agora` e `ciclo_fim = agora + 30 dias`, enquanto `abrir_ciclo_cobranca` usa o ciclo ancorado em `assinaturas.inicio_ciclo`. Além da divergência de ciclo, uma nova tentativa de seleção pode gerar outro `faturaId` e outra cobrança Asaas. É necessário definir a regra de mudança de plano (imediata/próximo ciclo) e tornar a criação da fatura idempotente antes de liberar faturamento recorrente.
+- O fluxo `selecionarPlanoEmpresa` cria uma fatura imediatamente com `ciclo_inicio = agora` e `ciclo_fim = agora + 30 dias`, enquanto `abrir_ciclo_cobranca` usa o ciclo ancorado em `assinaturas.inicio_ciclo`. Além da divergência de ciclo, o código usa `agora + 30 dias`, enquanto o banco calcula o próximo ciclo com intervalo de mês ancorado na assinatura; meses de 28, 29 ou 31 dias podem divergir. Uma nova tentativa de seleção também pode gerar outro `faturaId` e outra cobrança Asaas. É necessário definir a regra de mudança de plano (imediata/próximo ciclo) e tornar a criação da fatura idempotente antes de liberar faturamento recorrente.
 - O fluxo de webhook ainda não implementa uma política contábil para reembolso total, reembolso parcial e chargeback do Asaas. Esses eventos precisam de tratamento explícito antes de operar com dinheiro real.
 - A aplicação de migrations não deve começar enquanto a reconciliação do histórico ausente e a sequência completa de dependências não estiverem fechadas.
 
