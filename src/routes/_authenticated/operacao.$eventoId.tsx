@@ -310,7 +310,9 @@ function OperacaoEvento() {
             .from("selfies-ponto")
             .createSignedUrl(fotoUrl, 3600);
           if (error || !data?.signedUrl) {
-            toast.error("Não foi possível abrir a evidência. Verifique sua permissão de supervisão.");
+            toast.error(
+              "Não foi possível abrir a evidência. Verifique sua permissão de supervisão.",
+            );
             return;
           }
           fotoUrl = data.signedUrl;
