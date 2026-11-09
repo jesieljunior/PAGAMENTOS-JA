@@ -399,14 +399,12 @@ export const selecionarPlanoEmpresa = createServerFn({ method: "POST" })
     }
 
     const ehGratuito = plano.codigo === "free" || plano.mensalidade === 0;
-    const trialAte = ehGratuito
-      ? new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString()
-      : null;
 
-    // Consulta assinatura existente da agência
+    // Consulta assinatura existente da agência. O prazo do trial é histórico:
+    // selecionar novamente o plano gratuito não pode reiniciar os 7 dias.
     let { data: assinaturaExistente } = await client
       .from("assinaturas")
-      .select("id, plano_id, status")
+      .select("id, plano_id, status, trial_ate")
       .eq("empresa_id", empresaId)
       .maybeSingle();
 
@@ -414,7 +412,7 @@ export const selecionarPlanoEmpresa = createServerFn({ method: "POST" })
       try {
         const resAssAdmin = await admin
           .from("assinaturas")
-          .select("id, plano_id, status")
+          .select("id, plano_id, status, trial_ate")
           .eq("empresa_id", empresaId)
           .maybeSingle();
         assinaturaExistente = resAssAdmin.data;
@@ -422,6 +420,12 @@ export const selecionarPlanoEmpresa = createServerFn({ method: "POST" })
         // ignora
       }
     }
+
+    const trialAte = ehGratuito
+      ? assinaturaExistente
+        ? assinaturaExistente.trial_ate
+        : new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString()
+      : null;
 
     const patchAssinatura = {
       plano_id: plano.id,
@@ -475,13 +479,13 @@ export const selecionarPlanoEmpresa = createServerFn({ method: "POST" })
         trial_ate: trialAte,
       };
 
-      let novaAssinatura: { id: string; plano_id: string | null; status: string } | null = null;
+      let novaAssinatura: { id: string; plano_id: string | null; status: string; trial_ate: string | null } | null = null;
       let erroCriacaoAssinatura: string | null = null;
 
       const resultadoCliente = await client
         .from("assinaturas")
         .insert(novaAssinaturaPayload)
-        .select("id, plano_id, status")
+        .select("id, plano_id, status, trial_ate")
         .maybeSingle();
 
       if (resultadoCliente.error) {
