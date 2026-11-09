@@ -299,7 +299,7 @@ DROP FUNCTION IF EXISTS public.efetivar_pagamento_pix_db(
   uuid, uuid, text, text, timestamptz, text, text, text
 );
 
-CREATE FUNCTION public.efetivar_pagamento_pix_db(
+CREATE OR REPLACE FUNCTION public.efetivar_pagamento_pix_db(
   _pagamento_id uuid,
   _empresa_id uuid,
   _status_final text,
@@ -431,7 +431,7 @@ REVOKE ALL ON FUNCTION public.reverter_transferencia_pagamento_pix(uuid, text, t
   FROM PUBLIC, anon, authenticated;
 DROP FUNCTION IF EXISTS public.reverter_transferencia_pagamento_pix(uuid, text, text, text);
 
-CREATE FUNCTION public.reverter_transferencia_pagamento_pix_seguro(
+CREATE OR REPLACE FUNCTION public.reverter_transferencia_pagamento_pix_seguro(
   _pagamento_id uuid,
   _transferencia_id text,
   _status_final text,
