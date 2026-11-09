@@ -21,7 +21,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { formatarCnpjOuCpf, moeda } from "@/lib/dominio";
 import { concluirCadastroComEmpresaEPlano } from "@/lib/onboarding.functions";
-import { DIAS_TRIAL_PADRAO, PLANOS_CATALOGO } from "@/lib/planos-catalogo";
+import { DIAS_TRIAL_PADRAO, PLANOS_CATALOGO, trialEstaAtivo } from "@/lib/planos-catalogo";
 import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/_authenticated/onboarding")({
@@ -82,14 +82,16 @@ function Onboarding() {
 
       await queryClient.invalidateQueries();
 
-      if (res.planoCodigo === "free") {
+      if (res.planoCodigo === "free" && trialEstaAtivo(res.trialAte)) {
         toast.success(
           `Agência criada com sucesso! Você tem ${DIAS_TRIAL_PADRAO} dias de acesso gratuito liberados.`,
         );
         navigate({ to: "/painel", replace: true });
       } else {
-        toast.success(
-          `Agência criada. Finalize a contratação do plano ${res.planoNome} na próxima tela.`,
+        toast.info(
+          res.planoCodigo === "free"
+            ? "O período gratuito já foi utilizado ou expirou. Selecione um plano para reativar o acesso."
+            : `Agência criada. Finalize a contratação do plano ${res.planoNome} na próxima tela.`,
         );
         navigate({ to: "/plano", replace: true });
       }
