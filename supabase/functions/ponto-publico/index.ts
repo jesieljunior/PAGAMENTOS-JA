@@ -348,8 +348,20 @@ async function registrar(supabase: AdminClient, input: Record<string, unknown>) 
   if (fotoBase64) {
     const partesFoto = /^data:image\/(jpeg|png|webp);base64,([A-Za-z0-9+/=]+)$/.exec(fotoBase64);
     if (!partesFoto) throw new RequestError("Formato de selfie inválido.");
-    const formato = partesFoto[1];
-    const bytes = Uint8Array.from(atob(partesFoto[2]!), (caractere) => caractere.charCodeAt(0));
+    const formato = partesFoto[1]!;
+    const base64 = partesFoto[2]!;
+    const padding = base64.endsWith("==") ? 2 : base64.endsWith("=") ? 1 : 0;
+    const tamanhoEstimado = Math.floor((base64.length * 3) / 4) - padding;
+    if (tamanhoEstimado > 5 * 1024 * 1024) {
+      throw new RequestError("A selfie deve ter no máximo 5 MB.", 413);
+    }
+
+    let bytes: Uint8Array;
+    try {
+      bytes = Uint8Array.from(atob(base64), (caractere) => caractere.charCodeAt(0));
+    } catch {
+      throw new RequestError("Conteúdo da selfie inválido.");
+    }
     const caminho = `${evento.empresa_id}/${escala.id}/${crypto.randomUUID()}.${formato === "jpeg" ? "jpg" : formato}`;
     try {
       const { error } = await supabase.storage
