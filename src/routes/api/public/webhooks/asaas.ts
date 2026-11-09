@@ -9,15 +9,15 @@
 import { createFileRoute } from "@tanstack/react-router";
 
 import { gerarChaveWebhookAsaas, type EventoAsaasWebhook } from "@/lib/webhook-idempotencia";
+import {
+  EVENTOS_CREDITO_SALDO,
+  EVENTOS_FATURA_SAAS,
+  STATUS_CREDITO_SALDO,
+  STATUS_FATURA_SAAS,
+} from "@/lib/asaas-payment-policy";
 
 type EventoAsaas = EventoAsaasWebhook;
 
-const EVENTOS_FATURA_SAAS = new Set([
-  "PAYMENT_RECEIVED",
-  "PAYMENT_CONFIRMED",
-  "PAYMENT_RECEIVED_IN_CASH",
-]);
-const EVENTOS_CREDITO_SALDO = new Set(["PAYMENT_RECEIVED", "PAYMENT_RECEIVED_IN_CASH"]);
 
 type ResultadoRpcFinanceira = {
   ok?: boolean;
@@ -227,7 +227,7 @@ export const Route = createFileRoute("/api/public/webhooks/asaas")({
             if (faturaPlataforma) {
               const { obterCobrancaAsaas } = await import("@/lib/asaas.server");
               const cobrancaVerificada = await obterCobrancaAsaas(parceiroId);
-              const statusAceitos = new Set(["RECEIVED", "CONFIRMED", "RECEIVED_IN_CASH"]);
+              const statusAceitos = STATUS_FATURA_SAAS;
               const valorAsaas = Number(cobrancaVerificada.value);
 
               if (
@@ -293,7 +293,7 @@ export const Route = createFileRoute("/api/public/webhooks/asaas")({
               if (
                 remota.id !== parceiroId ||
                 remota.externalReference !== cobrancaLocal.id ||
-                !["RECEIVED", "RECEIVED_IN_CASH"].includes(remota.status) ||
+                !STATUS_CREDITO_SALDO.has(remota.status) ||
                 !Number.isFinite(valorAsaas) ||
                 Math.abs(valorAsaas - Number(cobrancaLocal.valor)) >= 0.005
               ) {
