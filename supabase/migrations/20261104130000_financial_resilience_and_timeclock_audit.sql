@@ -32,7 +32,7 @@ ALTER TABLE public.webhook_eventos ADD COLUMN IF NOT EXISTS erro text;
 
 -- 3. Índices únicos parciais em movimentos_saldo para evitar duplo débito ou duplo estorno por pagamento
 -- Verifica o ledger antes dos índices: não tenta escolher ou apagar lançamentos históricos automaticamente.
-DO $
+DO $$
 BEGIN
   IF EXISTS (
     SELECT 1
@@ -45,7 +45,7 @@ BEGIN
       'Há pagamentos com lançamentos contábeis duplicados. Reconcilie o ledger antes de aplicar a migration 20261104130000.';
   END IF;
 END;
-$;
+$$;
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_movimentos_pagamento_debito
   ON public.movimentos_saldo (pagamento_id)
