@@ -95,6 +95,7 @@ A migration final não configura nem altera credenciais do Mercado Pago. A aplic
 A inspeção foi feita em modo somente leitura no projeto **JÁ - BANCO DE DADOS**.
 
 - O histórico retornado pelo Supabase está vazio e a relação `supabase_migrations.schema_migrations` não existe. Portanto, não é possível usar o histórico padrão para decidir quais arquivos já foram aplicados.
+- O `supabase/config.toml` apontava para um project ref que não aparece na lista de projetos acessíveis. Foi corrigido para o projeto de teste ativo `JÁ - BANCO DE DADOS` (`vqkpirqipvigyqxdanau`); confirme o destino antes de qualquer deploy de função ou migration.
 - O schema está parcialmente adiantado: `tentativas_ponto_publico`, `auditoria_ponto_publico` e as colunas de QR Code/evidência já existem.
 - As tabelas centrais do Billing V2 — `faturas_plataforma`, `participacoes_operacionais` e `ciclos_cobranca` — ainda não existem.
 - A tabela `planos` existe, mas está vazia. A interface possui catálogo estático de fallback, porém as funções de banco dependem de registros reais em `planos`; a nova migration de seed cobre a instalação inicial sem sobrescrever configurações existentes. A mesma migration cria uma assinatura `bloqueada` para empresas sem assinatura, vinculada ao plano Free, para impedir acesso gratuito ilimitado por ausência de registro. Essas empresas precisam selecionar explicitamente um plano; o onboarding só libera os sete dias quando cria uma assinatura nova.
