@@ -58,22 +58,17 @@ export function criarTokenQrCodeAssinado(
     qr_code_expira_em?: string | null;
     qr_code_token?: string | null;
   },
-  opcoes?: {
+  opcoes: {
     exigeSelfie?: boolean;
     exigeGps?: boolean;
     pontoBasico?: boolean;
-    duracaoHoras?: number;
+    expiraEm: string;
   },
 ): string {
   const agora = Date.now();
-  const duracaoMs = (opcoes?.duracaoHoras ?? 24) * 60 * 60_000;
-  let expTimestamp = agora + duracaoMs;
-
-  if (evento.qr_code_expira_em) {
-    const gravada = new Date(evento.qr_code_expira_em).getTime();
-    if (Number.isFinite(gravada) && gravada > agora) {
-      expTimestamp = Math.max(expTimestamp, gravada);
-    }
+  const expTimestamp = new Date(opcoes.expiraEm).getTime();
+  if (!Number.isFinite(expTimestamp) || expTimestamp <= agora) {
+    throw new Error("Não é possível gerar um QR Code expirado ou sem prazo válido.");
   }
 
   const payload: PayloadQrCodePonto = {
