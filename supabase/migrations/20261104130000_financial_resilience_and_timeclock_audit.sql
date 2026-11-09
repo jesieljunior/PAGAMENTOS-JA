@@ -61,7 +61,7 @@ RETURNS uuid
 LANGUAGE sql
 STABLE
 SECURITY DEFINER
-SET search_path = public
+SET search_path = pg_catalog, public, pg_temp
 AS $$
   SELECT public.empresa_do_fechamento(p.fechamento_id)
   FROM public.pagamentos p
@@ -76,7 +76,7 @@ CREATE OR REPLACE FUNCTION public.iniciar_processamento_pagamento_pix(_pagamento
 RETURNS jsonb
 LANGUAGE plpgsql
 SECURITY DEFINER
-SET search_path = public
+SET search_path = pg_catalog, public, pg_temp
 AS $$
 DECLARE
   v_pagamento RECORD;
@@ -163,7 +163,7 @@ CREATE OR REPLACE FUNCTION public.efetivar_pagamento_pix_db(
 RETURNS jsonb
 LANGUAGE plpgsql
 SECURITY DEFINER
-SET search_path = public
+SET search_path = pg_catalog, public, pg_temp
 AS $$
 DECLARE
   v_pagamento RECORD;
@@ -263,7 +263,7 @@ CREATE OR REPLACE FUNCTION public.reverter_transferencia_pagamento_pix(
 RETURNS jsonb
 LANGUAGE plpgsql
 SECURITY DEFINER
-SET search_path = public
+SET search_path = pg_catalog, public, pg_temp
 AS $$
 DECLARE
   v_pagamento RECORD;
