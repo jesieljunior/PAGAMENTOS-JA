@@ -589,6 +589,116 @@ export const selecionarPlanoEmpresa = createServerFn({ method: "POST" })
       }
     }
 
+    // Antes de criar outra cobrança, reconcilia qualquer fatura ainda pendente.
+    // Uma resposta perdida do Asaas nunca deve gerar uma segunda cobrança automática.
+    if (plano.mensalidade > 0) {
+      let consultaFaturaPendente = await client
+        .from("faturas_plataforma")
+        .select("id, plano_id, total, status, referencia_provedor, vencimento")
+        .eq("empresa_id", empresaId)
+        .in("status", ["pendente", "atrasada"])
+        .order("criado_em", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (consultaFaturaPendente.error && admin) {
+        consultaFaturaPendente = await admin
+          .from("faturas_plataforma")
+          .select("id, plano_id, total, status, referencia_provedor, vencimento")
+          .eq("empresa_id", empresaId)
+          .in("status", ["pendente", "atrasada"])
+          .order("criado_em", { ascending: false })
+          .limit(1)
+          .maybeSingle();
+      }
+
+      if (consultaFaturaPendente.error) {
+        throw new Error("Não foi possível verificar cobranças SaaS pendentes.");
+      }
+
+      const faturaPendente = consultaFaturaPendente.data;
+      if (faturaPendente) {
+        if (faturaPendente.plano_id !== plano.id) {
+          throw new Error(
+            "Existe uma fatura SaaS pendente de outro plano. Regularize ou cancele essa cobrança antes de trocar de plano.",
+          );
+        }
+
+        const { buscarCobrancaPorReferencia, obterPixQrCode } =
+          await import("./asaas.server");
+        const resultadoBusca = await buscarCobrancaPorReferencia(faturaPendente.id);
+        const cobrancasEncontradas = resultadoBusca.data ?? [];
+
+        if (cobrancasEncontradas.length !== 1) {
+          throw new Error(
+            "Já existe uma fatura pendente, mas a cobrança correspondente não pôde ser conciliada com segurança. Não foi criada outra cobrança; é necessária reconciliação.",
+          );
+        }
+
+        const cobrancaExistente = cobrancasEncontradas[0]!;
+        const valorExistente = Number(cobrancaExistente.value);
+        if (
+          cobrancaExistente.externalReference !== faturaPendente.id ||
+          !Number.isFinite(valorExistente) ||
+          Math.abs(valorExistente - Number(faturaPendente.total)) >= 0.005
+        ) {
+          throw new Error(
+            "A cobrança encontrada no Asaas diverge da fatura pendente. A criação de uma nova cobrança foi bloqueada.",
+          );
+        }
+
+        if (!["PENDING", "OVERDUE"].includes(cobrancaExistente.status)) {
+          throw new Error(
+            `A cobrança existente está com status ${cobrancaExistente.status}. Aguarde a conciliação do webhook antes de tentar novamente.`,
+          );
+        }
+
+        if (
+          faturaPendente.referencia_provedor &&
+          faturaPendente.referencia_provedor !== cobrancaExistente.id
+        ) {
+          throw new Error("A referência Asaas da fatura diverge da cobrança localizada.");
+        }
+
+        const dadosReferencia = {
+          referencia_provedor: cobrancaExistente.id,
+          provedor: "asaas",
+          atualizado_em: new Date().toISOString(),
+        };
+        const persistenciaReferencia = admin
+          ? await admin
+              .from("faturas_plataforma")
+              .update(dadosReferencia)
+              .eq("id", faturaPendente.id)
+              .eq("empresa_id", empresaId)
+          : await client
+              .from("faturas_plataforma")
+              .update(dadosReferencia)
+              .eq("id", faturaPendente.id)
+              .eq("empresa_id", empresaId);
+
+        if (persistenciaReferencia.error) {
+          throw new Error(
+            "A cobrança foi localizada, mas a referência não pôde ser persistida. Não será criada outra cobrança.",
+          );
+        }
+
+        const pixExistente = await obterPixQrCode(cobrancaExistente.id);
+        return {
+          ok: true,
+          planoNome: plano.nome,
+          mensalidade: plano.mensalidade,
+          cobranca: {
+            faturaId: faturaPendente.id,
+            valor: valorExistente,
+            pixCopiaCola: pixExistente.payload || "",
+            checkoutUrl: cobrancaExistente.invoiceUrl || `/plano?fatura=${faturaPendente.id}`,
+            vencimento: faturaPendente.vencimento,
+          },
+        };
+      }
+    }
+
     // Gera fatura e cobrança imediata caso o plano contratado tenha mensalidade
     let faturaId: string = crypto.randomUUID();
     let cobrancaInfo = null;
