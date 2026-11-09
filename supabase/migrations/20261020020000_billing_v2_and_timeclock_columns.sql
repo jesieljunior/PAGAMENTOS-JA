@@ -808,7 +808,7 @@ CREATE OR REPLACE FUNCTION public.tg_ponto_evidencias_plano()
 RETURNS trigger
 LANGUAGE plpgsql
 SECURITY DEFINER
-SET search_path = public, pg_temp
+SET search_path = pg_catalog, public, pg_temp
 AS $
 DECLARE
   p public.planos;
