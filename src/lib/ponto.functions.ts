@@ -2,21 +2,13 @@ import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
-import { criarSupabaseClientComAuth } from "@/integrations/supabase/authenticated.server";
 import { createSupabasePublicClient } from "@/integrations/supabase/public.server";
 import {
-  adicionarPontoSessao,
-  atualizarStatusEscalaSessao,
-  buscarSessaoEventoPorToken,
   type EscalaSessao,
   type PontoSessao,
   salvarSessaoEvento,
 } from "./ponto-store.server";
-import {
-  criarTokenQrCodeAssinado,
-  decodificarTokenQrCode,
-  type PayloadQrCodePonto,
-} from "./ponto.signed-token";
+import { criarTokenQrCodeAssinado } from "./ponto.signed-token";
 
 // Suporta tokens padrão (ex: UUID ou hash) e tokens assinados (prefixo qr.)
 const tokenSchema = z.object({ token: z.string().min(8).max(2048) });
